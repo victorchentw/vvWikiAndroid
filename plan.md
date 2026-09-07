@@ -20,7 +20,7 @@
 ```text
 GitHub: vvdoc                    GitLab: radoc
         \                         /
-         \-- read-only Provider API --/
+         \-- read-only Git SSH transport --/
                        |
               Android Sync Layer
                        |
@@ -39,23 +39,33 @@ GitHub: vvdoc                    GitLab: radoc
 ### 建議取捨
 
 1. **Android 直接讀取 GitHub/GitLab**：同步後資料可離線瀏覽，且不必把整個 Wiki 上傳到另一台 server。
-2. **Gemini 透過 Query BFF**：Gemini key 不放在 APK；BFF 只收到問題與少量檢索片段，不負責保存完整 Wiki。
+2. **Gemini 預設透過 Query BFF**：BFF 只收到問題與少量檢索片段，不負責保存完整 Wiki；因本 APK 僅本人使用，也允許 standalone build 直接注入自己的 Gemini key。
 3. **第一版先用本機 lexical/hybrid search**：SQLite FTS5、標題／路徑／metadata；不先建立大型 vector database。
 4. **第二階段才加入 Gemini Embedding**：若實際查詢常因同義詞、中文／英文改寫而漏資料，再在 BFF 或 indexing worker 加 semantic retrieval。
 5. **Markdown/Git 是 source of truth**：手機資料庫與 embedding 都是可以刪除、重建的衍生資料。
 
+### Credential 策略（個人自用 APK）
+
+本案採用「APK 只給本人使用」的部署假設，因此可以使用自己的長期 SSH private key，不採用短期 OAuth token。實際測試確認 `/mnt/ssd/vvdoc/key/id_rsa` 目前可讀取 GitHub 的 `vvdoc` 與 GitLab 的 `ra_doc`。
+
+- 第一版使用 Git SSH transport；現有 `id_rsa` 在 **build time** 注入 APK，或由首次啟動時匯入。
+- key 只從本機 ignored path／environment 讀取，絕不 commit 到 `vvWikiAndroid`、不寫入 log、不要上傳 CI artifact。
+- 安裝後可將 key 存於 app-private storage，並用 Android Keystore 加密；這是 at-rest 保護，不宣稱能防止 APK 被本人以外分析。
+- SSH key 只授予 repository read access；若未來 APK 外流，直接在 GitHub/GitLab 撤銷並換 key。
+- Gemini key 與 Git SSH key 是兩件事；Gemini 仍可用 BFF，或在自用 standalone APK 以同樣的 build-time／首次匯入方式提供。
+
 ### 不建議的方案
 
-- 不在 APK 內固定放 GitHub token、GitLab token 或 Gemini API key。
+- 不把 private key 或 Gemini key 提交到 source repo；「自用 APK 內含 key」與「Git repo 內含 key」是兩件事。
 - 不把兩個 repo 全部內容每次 query 都送給 Gemini。
-- 不讓手機第一版直接做 `git clone` 並保存完整 `.git` history；以 commit manifest + raw/blob API 下載所需檔案較省空間、較容易恢復。
-- 不把二進位檔、private key、certificate、password 檔案送進 AI context。
+- 不保存完整 `.git` history；以 shallow clone/fetch、sparse checkout 或等效方式保留最新內容。
+- 不把二進位檔、certificate、password 檔案送進 AI context。
 
 ## 3. MVP 範圍
 
 ### 必做
 
-- 設定兩個 repository：provider、owner/project、repo、branch、read-only credential。
+- 設定兩個 repository：provider、owner/project、repo、branch；使用 build-time 注入的個人 SSH key 做 read-only sync。
 - 手動同步、啟動時檢查更新、可選的 Wi-Fi/充電時背景同步。
 - 以 commit SHA 判斷是否更新，只下載新增／修改檔案，處理刪除檔案。
 - 本機保存 Markdown／純文字與 metadata。
@@ -129,33 +139,37 @@ max_file_size_mb: 20
 
 ## 5. 同步設計
 
-### Provider 介面
+### Provider 介面與 SSH key
 
-建立統一介面，第一版實作：
+因為要沿用自己的 SSH private key，第一版使用 Git SSH transport，而不是 GitHub/GitLab REST Contents API（SSH private key 不能直接當 REST API token）：
 
 ```text
 RepositoryProvider
-  - getHeadCommit(repository, branch)
-  - listTree(repository, branch/commit)
-  - downloadTextFile(repository, path, commit)
+  - resolveHead(repository, branch)
+  - fetchLatest(repository, branch, localPath)
+  - listTree(localPath)
+  - readTextFile(localPath, path)
 ```
 
-- `GitHubProvider`：使用 GitHub API。
-- `GitLabProvider`：使用 GitLab API。
-- credential 只需 read-only scope：GitHub fine-grained token 的 contents read、GitLab `read_repository`；實際 scope 以官方現行規格確認。
-- 不依賴 remote URL 的 SSH private key；手機不應匯入 `/mnt/ssd/vvdoc/key/` 任何檔案。
+- `GitHubProvider`：SSH remote，例如 `git@github.com:...`。
+- `GitLabProvider`：SSH remote，例如 `git@gitlab.com:...`。
+- Android 先做 JGit + Apache MINA SSHD 相容性 spike；若在 Android 上不穩定，再評估 libgit2 JNI。
+- 使用 shallow clone/fetch 與 sparse checkout；不保存完整 Git history。
+- key 可由 Gradle 從 `VVWIKI_SSH_KEY_PATH=/mnt/ssd/vvdoc/key/id_rsa` 讀取並打包成自用 APK asset，或第一次啟動時匯入；Android runtime 不使用電腦上的絕對路徑。
+- app 內驗證 `github.com`、`gitlab.com` 的 pinned `known_hosts`；不可使用 `StrictHostKeyChecking=no`。
+- SSH key 不會送到 Gemini、BFF 或任何第三方 API。
 
 ### 同步流程
 
-1. 讀取 repository 設定與 branch。
-2. 取得 remote HEAD commit SHA。
+1. 讀取 repository 設定、SSH remote 與 branch。
+2. 以 app 內的 SSH key 建立 Git SSH session，取得 remote HEAD commit SHA。
 3. SHA 相同則結束，顯示「已是最新」。
-4. 取得 tree manifest，套用 include/exclude 規則。
-5. 與本機 manifest 比較，只下載新增／修改檔案，刪除已不存在的檔案。
+4. 以 shallow fetch/clone 更新本機 working tree；套用 sparse checkout 與 include/exclude 規則。
+5. 比較 commit/tree manifest，只處理新增／修改檔案，刪除已不存在的檔案。
 6. 以 UTF-8 stream 讀取文字；超過限制的檔案記錄為 skipped，不使整次同步失敗。
 7. 解析 Markdown heading、front matter、來源標記與行號。
 8. 建立 chunks、更新 FTS index；整次同步成功後才切換 active commit。
-9. 儲存 sync log、錯誤、檔案數、bytes、commit SHA 與時間。
+9. 儲存 sync log、錯誤、檔案數、bytes、commit SHA 與時間，但不記錄 key。
 10. 網路中斷時可 retry/resume；不顯示不完整 index 為最新資料。
 
 ### Sync metadata
@@ -174,7 +188,7 @@ included_or_excluded
 parse_status
 ```
 
-不需要保存 GitHub/GitLab API response 中的 token 或不必要的個人資料。
+不需要保存 provider session 的多餘資料；SSH private key 不進 sync log、資料庫 metadata 或 Gemini request。
 
 ## 6. 本機資料與 RAG indexing
 
@@ -272,9 +286,11 @@ System prompt 應要求：
 6. 不輸出被遮蔽的 token、password、private key 或其他 secret。
 7. 以繁體中文回答，保留程式碼、版本號、decision ID 等原文精確值。
 
-### 直接從 APK 呼叫 Gemini 的替代方案
+### Gemini credential（自用 standalone 模式）
 
-只適合個人 sideload prototype：API key 由使用者在設定頁輸入後放入 Keystore，並在 Gemini project 設 quota。即使放在 Keystore，APK 與執行環境仍可能被分析，**不可視為真正保密**；不可用固定 key 打包公開發佈版本。
+若不部署 BFF，個人版也可以由使用者提供自己的 Gemini API key：在 build time 注入，或首次啟動匯入後存入 Android Keystore。這符合本案自用 APK 的假設，但 key 仍可能被從 APK／執行環境取出，因此必須設定 quota 並能隨時 rotate。
+
+Gemini request 仍只送本機檢索出的 Top-K 片段，不送完整 Wiki。若日後 APK 要分享給其他人，再改回 BFF，不應沿用內含 key 的 build。
 
 ## 8. Android UI
 
@@ -308,8 +324,9 @@ System prompt 應要求：
 - token 只存 Android Keystore 保護的加密資料；不要進 log、crash report、backup 或 analytics。
 - local Wiki cache 加密；敏感版本可使用 SQLCipher 或 app-level AES-GCM。
 - Android Auto Backup 排除 token、database key 與 Wiki cache，除非使用者明確同意。
-- 只申請 GitHub/GitLab read-only scope。
-- APK 不包含任何 repository token、Gemini key、SSH key、keystore 或 certificate。
+- SSH key 僅用於兩個 repository 的 read-only Git access；若改用 API fallback，才使用最小 read-only scope。
+- 本人專用 build 可故意包含指定的 SSH/Gemini key；但 key 必須由 ignored local path 在 build time 注入，不能提交到 source repo、log、backup 或 CI artifact。
+- APK 不包含任何未授權的其他 repository token、SSH key、keystore 或 certificate。
 - request 只送 Top-K 必要片段，不送完整 repo。
 - AI context 先經路徑 allowlist 與內容 secret scan。
 - BFF 使用 HTTPS、authentication、rate limit、Secret Manager；關閉不必要 request logging。
@@ -320,14 +337,14 @@ System prompt 應要求：
 
 | 風險 | 對策 |
 |---|---|
-| APK 被反編譯取得 Gemini key | 不把固定 key 放 APK；使用 BFF；prototype key 設低 quota、可撤銷 |
-| Repo token 外洩 | read-only scope、Keystore、biometric lock、不可 backup、可撤銷 |
+| APK 被反編譯取得 SSH key | 本案自用 APK 接受此風險；key 僅 read-only，APK 外流時撤銷並換 key |
+| APK 被反編譯取得 Gemini key | 自用 standalone build 可接受；設低 quota、可 rotate；對外發佈時改用 BFF |
 | private key/password 被同步 | allowlist、denylist、secret scan、binary 排除 |
 | 文件內 prompt injection | context delimiter、只讓 Gemini回答、禁止執行文件指令 |
 | Gemini 幻覺 | Top-K grounding、強制 citations、不足證據時拒答 |
 | 資料過期 | 顯示 commit SHA/同步時間；query 前提示 stale cache |
 | API rate limit／大型檔案 | commit manifest、增量下載、大小上限、retry/backoff |
-| 手機遺失 | 加密 cache、清除資料、撤銷 provider token、可選 biometric |
+| 手機遺失 | 加密 cache、清除資料；必要時撤銷/更換 SSH key；可選 biometric |
 
 ## 10. 建議專案結構
 
@@ -364,12 +381,12 @@ vvwikiapp/
 
 - 建立 Compose app、repository settings、Room schema、encrypted cache。
 - 實作 Markdown/text viewer、文件 metadata 與 FTS5。
-- 先用 local fixture 測試，不接真實 token。
+- 先用 local fixture 測試，不接真實 SSH key。
 
 ### Phase 2：Git provider sync
 
-- 先完成 GitHub `vvdoc` read-only sync。
-- 加入 GitLab `radoc` adapter。
+- 先完成 GitHub `vvdoc` 的 SSH read-only sync。
+- 加入 GitLab `radoc` 的 SSH adapter；兩者共用 build-time 注入的個人 key。
 - 實作 commit comparison、增量下載、刪除、retry、錯誤 UI、WorkManager。
 - 用 fake provider 加測試後才使用真實 private repo。
 
@@ -413,7 +430,7 @@ vvwikiapp/
 
 ### Security
 
-- 反編譯 APK 找不到固定 provider token 或 Gemini key。
+- source repo、Git history、log 與 CI artifact 找不到 provider/Gemini private key；自用 APK 是否內含指定 key 視本案部署假設接受。
 - log、backup、crash report 不含 token 或 Wiki 內容。
 - 使用者可在 app 內清除 cache 並知道如何 revoke token。
 - 確認 Gemini/Vertex AI 的資料處理條款後，才將工作 Wiki 開放給該 provider。
@@ -422,7 +439,7 @@ vvwikiapp/
 
 1. `radoc` 要直接支援 GitLab，還是先同步到 GitHub mirror？
 2. 是否只需要 read-only，還是未來要在手機編輯並 push？
-3. 可否部署一個私人 Query BFF？若不行，是否接受 prototype 將 API key 由使用者輸入到 APK？
+3. Gemini 是否採用 BFF？若做 standalone 自用 APK，是否採 build-time 注入或首次匯入自己的 Gemini key？
 4. `radoc` 的工作內容可否送至 Gemini？若有公司限制，應優先使用核准的 Vertex AI project 或先做遮蔽。
 5. `vvdoc/Andriod_MB66.txt` 與 `radoc/meeting_transcript` 是否納入第一版？
 6. 需要支援最低 Android 版本、是否只 sideload、是否需要 Play Store 發佈？
@@ -434,5 +451,5 @@ vvwikiapp/
 1. 先完成 Phase 0 的 allowlist 與 Gemini data policy 決定。
 2. 在 `vvwikiapp` 建立 Android skeleton 與 fake provider 測試。
 3. 以 `vvdoc/wiki/` 與 `radoc/wiki/` 做第一批 fixture，確認同步、chunk、citation。
-4. 再接入實際 read-only credentials 與 GitHub/GitLab API。
-5. 最後才開啟 Gemini BFF；不要在第一個 APK 版本內硬編碼任何 key。
+4. 以 `/mnt/ssd/vvdoc/key/id_rsa` 驗證 Android SSH library，接上 GitHub/GitLab SSH sync；不要把 key 提交到 app repo。
+5. 接上 Gemini（BFF 或自用 APK 的 build-time／首次匯入 key），並限制只送 Top-K context。
