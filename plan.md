@@ -205,7 +205,28 @@ parse_status
 - Background sync：WorkManager。
 - Network：OkHttp/Retrofit 或等效 HTTP client。
 - Markdown：可處理 heading、code block、table、wiki link 的 parser。
-- Secrets：Android Keystore；token 及加密 database key 不進普通 SharedPreferences。
+- Secrets：Android Keystore；credential 及加密 database key 不進普通 SharedPreferences。
+
+### FTS5 的目的與資料分層
+
+SQLite FTS5 是本機的**全文搜尋索引**，用來實作 Gemini 的 `search_wiki()` tool；它不是 Wiki source of truth、不是 vector database，也不是 Gemini 本身。它讓 App 能快速找出檔案／heading／行號，再讓 Gemini 呼叫 `read_wiki()` 讀取實際內容。
+
+本機資料分成三層：
+
+```text
+Remote Git repo
+  -> encrypted file cache：保存允許同步的完整 Markdown/文字檔
+  -> document/chunk metadata：repo、path、heading、line range、commit
+  -> SQLite FTS5：索引 chunk 文字、標題、路徑與 metadata
+```
+
+因此：
+
+- **要讓 `read_wiki()` 離線讀取的檔案，必須先完整下載到 file cache**；FTS5 不必保存另一份完整檔案，可使用 contentless/external-content index 避免重複佔空間。
+- FTS5 只負責快速 lexical/BM25 召回，不理解真正語意；Gemini 可以根據結果繼續改寫 query、搜尋與讀取。
+- 預設不是把兩個 repository 的每一個 file 都下載：只同步前面 allowlist 指定的 Markdown/純文字 Wiki。`wiki/` 整理層預設完整同步；raw transcript、大型原始檔與其他文字資料以 profile opt-in。
+- key、certificate、`.git` history、JAR/class、圖片、Office/PDF 等排除或未解析檔案不進 FTS5，也不進 Gemini context。
+- 若使用者開啟 `all-readable-text` profile，可同步所有通過 secret scan 的文字／Markdown／程式碼檔；仍不包含 binary 與敏感檔。未下載的檔案，Gemini 只能收到「目前未同步」，不能自行假設其內容。
 
 ### Chunking
 
