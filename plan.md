@@ -1,8 +1,19 @@
 # 個人 Wiki Android APK：雙 Repo 同步與 Gemini Query 計畫
 
-- **狀態**：提案／尚未開始實作
-- **目標**：在 Android 手機上同步兩個個人 Wiki，支援離線瀏覽與搜尋，並以 Gemini 根據檢索到的內容回答問題、附上可點擊的來源。
-- **工作目錄**：`/mnt/ssd/github/vvwikiapp`
+- **狀態**：Phase 1 已落地；Phase 2 的 read-only SSH Git sync MVP 已實作並驗證；Room/FTS5、WorkManager 與 Gemini query 仍在後續階段。
+- **目標**：在 Android 手機上同步兩個個人 Wiki，支援離線瀏覽、完整 Markdown rendering、全文閱讀與搜尋，並以 Gemini 根據檢索到的內容回答問題、附上可點擊的來源。
+- **Markdown rendering 基準**：`/mnt/ssd/github/Obsidian_mini` 的 Wiki View；Android Reader 必須盡量維持相同語法、安全模型與瀏覽行為。
+- **工作目錄**：`/mnt/ssd/github/vvWikiAndroid`
+- **目前交付**：`app/build/outputs/apk/release/app-release.apk`；已以 wiki 記錄的 `victor.keystore.jks`／`victor` signing entry 簽署並用 `apksigner` 驗證。
+
+## 0. 本次無人職守 implementation 結果
+
+- 已建立可安裝的原生 Android app（package `com.victor.vvwiki`、app name `vv知識酷`、version `0.1.1`）。
+- 已完成 local fixture、Android file-picker import、allowlist scan、離線全文搜尋、dark-only rendered Reader、頁內 Search、文字縮放、Wiki link／fragment 導覽與 Back/Forward。
+- Reader 使用 APK 內 bundled markdown-it/plugin renderer、KaTeX CSS/fonts、highlight.js 與 Mermaid；WebView network、任意 raw HTML/script、secret-looking path 與 traversal 已封鎖。
+- 已在 Android emulator 安裝 release APK，實測 Library、Reader、Search、line hint、Wiki link navigation、Back/Forward，logcat 無 app/WebView fatal error。
+- 已加入 GitHub/GitLab read-only SSH sync：啟動／手動同步、pinned known_hosts、commit SHA、錯誤狀態、key import，以及只抓 `wiki/` 的 JGit partial/blob-filter sync；實機驗證取得 `vvdoc@vv_note` 與 `radoc@main`。
+- SSH private key 不放入 APK；使用者在 Settings 匯入後存於 app-private storage。未提供 push。Gemini key/function-calling、Room/FTS5、WorkManager 尚未實作。
 
 ## 1. 目前環境確認
 
@@ -50,17 +61,16 @@ GitHub: vvdoc                    GitLab: radoc
 
 ### Credential 策略（個人自用 APK）
 
-本案採用「APK 只給本人使用」的部署假設，因此可以使用自己的長期 SSH private key，不採用短期 OAuth token。實際測試確認 `/mnt/ssd/vvdoc/key/id_rsa` 目前可讀取 GitHub 的 `vvdoc` 與 GitLab 的 `ra_doc`。
+本案使用自己的 SSH private key，但 **secret 不得進 APK**；使用者在 Settings 透過 file picker 匯入，App 只保存在 app-private storage。實際測試確認 `/mnt/ssd/vvdoc/key/id_rsa` 可讀取 GitHub 的 `vvdoc` 與 GitLab 的 `ra_doc`，但該檔案不會進 APK。
 
-- 第一版使用 Git SSH transport；現有 `id_rsa` 在 **build time** 注入 APK，或由首次啟動時匯入。
-- key 只從本機 ignored path／environment 讀取，絕不 commit 到 `vvWikiAndroid`、不寫入 log、不要上傳 CI artifact。
-- 安裝後可將 key 存於 app-private storage，並用 Android Keystore 加密；這是 at-rest 保護，不宣稱能防止 APK 被本人以外分析。
-- APK 只實作 clone/fetch/read，不提供 push；但個人帳戶 SSH key 的權限由 GitHub/GitLab 帳號決定，未必是真正的 repository read-only。若要額外隔離，日後改用各 repo 專用的 read-only deploy key；若 APK 外流，直接撤銷並換 key。
+- 第一版使用 Git SSH transport；key 只接受首次啟動／Settings 匯入，不使用電腦上的絕對路徑，也不做 build-time asset injection。
+- key 絕不 commit 到 `vvWikiAndroid`、不寫入 log、不要上傳 CI artifact；目前 at-rest Keystore 加密列為後續 hardening。
+- APK 只實作 clone/fetch/read，不提供 push；但個人帳戶 SSH key 的權限由 GitHub/GitLab 帳號決定，未必是真正的 repository read-only。若要額外隔離，日後改用各 repo 專用的 read-only deploy key；key 遺失時直接撤銷。
 - Gemini key 與 Git SSH key 是兩件事；Gemini MVP 採本機多 key pool，輸入格式與 `/mnt/ssd/github/mia_vocabulary` 類似，request 隨機選 key，遇到 quota 再換另一把。
 
 ### 不建議的方案
 
-- 不把 private key 或 Gemini key 提交到 source repo；「自用 APK 內含 key」與「Git repo 內含 key」是兩件事。
+- 不把 private key 或 Gemini key 提交到 source repo，也不把 secret 放進 APK；使用者匯入後只留在 app-private storage。
 - 不把兩個 repo 全部內容每次 query 都送給 Gemini。
 - 不保存完整 `.git` history；以 shallow clone/fetch、sparse checkout 或等效方式保留最新內容。
 - 不把二進位檔、certificate、password 檔案送進 AI context。
@@ -69,12 +79,13 @@ GitHub: vvdoc                    GitLab: radoc
 
 ### 必做
 
-- 設定兩個 repository：provider、owner/project、repo、branch；使用 build-time 注入的個人 SSH key 做 sync-only 操作（clone/fetch/read）。
+- 設定兩個 repository：provider、owner/project、repo、branch；使用使用者匯入的個人 SSH key 做 sync-only 操作（clone/fetch/read）。
 - Gemini 設定頁可輸入多組 API key（每行一組或以逗號分隔），保存後每次 query 隨機調用。
 - 手動同步、啟動時檢查更新、可選的 Wi-Fi/充電時背景同步。
 - 以 commit SHA 判斷是否更新，只下載新增／修改檔案，處理刪除檔案。
 - 本機保存 Markdown／純文字與 metadata。
-- 離線搜尋與檔案閱讀。
+- 離線搜尋與完整檔案閱讀；使用者不必經過 Gemini，也能自行瀏覽目錄、查詢全文、開啟並閱讀任一已同步 Wiki Markdown／純文字檔。
+- Markdown Reader 的 rendering 與 navigation 以 `/mnt/ssd/github/Obsidian_mini` 為相容性基準，支援標題、表格、task list、code highlight、KaTeX、Mermaid、callout、footnote、`[[wiki links]]`、note/image embed、fragment link、safe HTML subset 與來源跳轉。
 - 跨兩個 Wiki 查詢，支援 repository filter。
 - 將相關片段交給 Gemini 生成回答。
 - 每個回答顯示：來源 repo、檔案路徑、heading、行號或 chunk 範圍、commit SHA／同步時間。
@@ -158,9 +169,9 @@ RepositoryProvider
 
 - `GitHubProvider`：SSH remote，例如 `git@github.com:...`。
 - `GitLabProvider`：SSH remote，例如 `git@gitlab.com:...`。
-- Android 先做 JGit + Apache MINA SSHD 相容性 spike；若在 Android 上不穩定，再評估 libgit2 JNI。
-- 使用 shallow clone/fetch 與 sparse checkout；不保存完整 Git history。
-- key 可由 Gradle 從 `VVWIKI_SSH_KEY_PATH=/mnt/ssd/vvdoc/key/id_rsa` 讀取並打包成自用 APK asset，或第一次啟動時匯入；Android runtime 不使用電腦上的絕對路徑。
+- Android 使用 JGit SSH transport + modern JSch；已在 emulator 驗證 GitHub/GitLab SSH、pinned host keys 與 partial/blob-filter fetch。
+- 使用 shallow metadata fetch、blob:none 與 selected wiki blob fetch；不保存完整 Git history，也不把整個大型 repo checkout 到手機。
+- key 只能在第一次啟動／Settings 由 file picker 匯入至 app-private storage；Gradle 不讀取或打包 private key，Android runtime 不使用電腦上的絕對路徑。
 - app 內驗證 `github.com`、`gitlab.com` 的 pinned `known_hosts`；不可使用 `StrictHostKeyChecking=no`。
 - SSH key 不會送到 Gemini、BFF 或任何第三方 API。
 
@@ -204,7 +215,7 @@ parse_status
 - Exact search：SQLite FTS5；中文／中英混合查詢必要時加 character n-gram 或自訂 tokenizer。
 - Background sync：WorkManager。
 - Network：OkHttp/Retrofit 或等效 HTTP client。
-- Markdown：可處理 heading、code block、table、wiki link 的 parser。
+- Markdown：Reader 採 app 內封裝、可離線執行的 hardened WebView + bundled `markdown-it` 相容 renderer，以便重用／移植 `Obsidian_mini` 的 parsing 規則與 CSS；不得依賴 CDN 或執行文件內 script。heading/chunk parser 另保留 Kotlin 層 metadata 與行號映射。
 - Secrets：Android Keystore；credential 及加密 database key 不進普通 SharedPreferences。
 
 ### FTS5 的目的與資料分層
@@ -375,6 +386,26 @@ Gemini request 只送 local tools 明確讀取後的 functionResponse，不送�
 - last sync、remote commit、檔案數、index 狀態。
 - `Sync all`、單 repo sync、retry。
 
+### Library／Search 頁
+
+- 依 repository、資料夾與檔名瀏覽所有已同步且 allowlisted 的 Markdown／純文字文件。
+- 本機全文搜尋可輸入任意關鍵字，支援 repo/path filter；結果顯示 snippet、heading 與行號，點擊後直接開啟 Reader 並定位命中位置。
+- 搜尋與閱讀完全離線可用，不要求 Gemini key，也不把內容送往外部服務。
+
+### Markdown Reader
+
+Reader 的呈現與行為 follow `/mnt/ssd/github/Obsidian_mini`，但 MVP 是 **read-only**；不得把 Obsidian_mini 的 WYSIWYG 修改功能誤帶進 sync-only Android app。
+
+- 完整呈現 CommonMark/GFM 基礎：frontmatter（可收合 metadata）、H1–H6、段落、Unicode、inline formatting、blockquote、ordered/bullet/task list、table、horizontal rule、Markdown links/images、fenced/indented code。
+- 對齊 Obsidian_mini 擴充：`==mark==`、安全 `<mark>/<del>/<s>`、KaTeX inline/block math、Obsidian callouts、`::: type` containers、Mermaid、footnotes、sub/sup/ins、definition list、abbreviation、emoji、`<details>/<summary>` 與 bare `<a id>`；任意 raw HTML 維持停用／escape。
+- 支援 `[[path]]`、`[[path#heading|alias]]`、`![[image]]` 與 `![[note#heading]]`；先按目前 repo/wiki root 的相對路徑解析，再以唯一檔名解析。未解析 link 要有明顯樣式且不可 crash。
+- Markdown fragment 與 portable anchor 可在頁內跳轉；Wiki link 點擊在 Reader 內導覽，保有 Back／Forward 與上一頁 scroll position。
+- 本機圖片與 note embed 只可讀 app-private allowlisted cache；阻擋 `..` traversal、`file://` 任意檔案、未允許 scheme 與 WebView network subresource。HTTPS/HTTP 一般連結交由 Android 外部瀏覽器確認後開啟。
+- Mermaid、KaTeX、highlight.js、CSS 與字型資源全部隨 APK 打包、離線可用；render error 顯示安全 escaped source／錯誤提示，不可白屏。
+- Reader 顯示 repo、relative path、commit SHA、同步時間；提供頁內 Search、文字選取／複製、−／＋字級縮放，固定 dark theme。
+- citation、FTS 搜尋結果與 backlink/source link 可用 `repo/path + heading/line range` 深連結開啟 Reader 並定位／highlight；行號映射以原始 Markdown 為準。
+- Android 建立由 `Obsidian_mini/test.md` 衍生的唯讀 rendering fixture/golden tests，覆蓋基礎文字到 Mermaid、KaTeX、embed、safe HTML 與惡意 payload；若 Android renderer 有意不相容，需在測試與文件中明列差異。
+
 ### Query 頁
 
 - 問題輸入框與 query history 開關。
@@ -414,7 +445,7 @@ Gemini request 只送 local tools 明確讀取後的 functionResponse，不送�
 
 | 風險 | 對策 |
 |---|---|
-| APK 被反編譯取得 SSH key | 本案自用 APK 接受此風險；app 不提供 push，但個人 key 權限可能較大，APK 外流時撤銷並換 key |
+| APK 被反編譯取得 SSH key | SSH key 不進 APK；匯入後只在 app-private storage，遺失／外流時撤銷並換 key |
 | APK 被反編譯取得 Gemini key | 自用 standalone build 可接受；設低 quota、可 rotate；對外發佈時改用 BFF |
 | private key/password 被同步 | allowlist、denylist、secret scan、binary 排除 |
 | 文件內 prompt injection | context delimiter、只讓 Gemini回答、禁止執行文件指令 |
@@ -454,18 +485,19 @@ vvwikiapp/
 - 建立 20–30 個實際查詢的 golden question set，包含精確 ID、中文改寫、時間演變、否定與跨 repo 問題。
 - 確認 `vvdoc` 未提交修改是否要先 commit/push；不由 APK 自動處理。
 
-### Phase 1：Android skeleton 與本機資料
+### Phase 1：Android skeleton、本機資料與 Reader
 
 - 建立 Compose app、repository settings、Room schema、encrypted cache。
-- 實作 Markdown/text viewer、文件 metadata 與 FTS5。
-- 先用 local fixture 測試，不接真實 SSH key。
+- 先完成 Library／Search、FTS5 與 read-only dark Markdown Reader，移植 Obsidian_mini 的 rendering syntax、Wiki navigation、安全限制及字級縮放。
+- 將 `/mnt/ssd/github/Obsidian_mini/test.md` 複製為不含敏感資料的 Android test fixture，建立 rendering smoke/golden tests與惡意 HTML/path traversal 測試。
+- 先用 local fixture 驗證可自行瀏覽、搜尋、開全文、Back／Forward、heading/line deep link 與完全離線 rendering，不接真實 SSH key。
 
 ### Phase 2：Git provider sync
 
-- 先完成 GitHub `vvdoc` 的 SSH sync-only（clone/fetch/read）。
-- 加入 GitLab `radoc` 的 SSH adapter；兩者共用 build-time 注入的個人 key。
-- 實作 commit comparison、增量下載、刪除、retry、錯誤 UI、WorkManager。
-- 用 fake provider 加測試後才使用真實 private repo。
+- [x] GitHub `vvdoc` 的 SSH sync-only（`vv_note`）與 GitLab `radoc`（`main`）。
+- [x] Settings SSH key import、pinned known_hosts、read-only UI 與 sync status；private key 不進 APK。
+- [x] commit comparison、wiki-only partial/blob fetch、刪除處理與 allowlist materialization。
+- [ ] Room/SQLite FTS5、WorkManager/background policy、retry/backoff、fake provider integration tests。
 
 ### Phase 3：Query MVP
 
@@ -496,6 +528,14 @@ vvwikiapp/
 - `key/`、certificate、binary、credential 類檔案不會進 AI context。
 - UI 能清楚顯示資料來自哪個 commit 與何時同步。
 
+### Reader／Local Search
+
+- 不設定 Gemini key、開啟飛航模式時，仍可依 repo/目錄瀏覽、全文搜尋並閱讀任何已同步且 allowlisted 的 Markdown／純文字檔。
+- Markdown rendering 通過由 `Obsidian_mini/test.md` 衍生的相容性 fixtures；至少涵蓋 table/task list、syntax highlight、KaTeX、Mermaid、callout、footnote、wiki link、note/image embed、fragment 與 safe HTML。
+- `[[wiki links]]`、一般相對 Markdown link、citation 與搜尋結果可開啟正確文件及 heading/line range；Back／Forward 能恢復閱讀位置。
+- Reader 支援 dark-only rendered view、頁內 Search、−／＋字級縮放、文字選取／複製；大型或 malformed 文件失敗時提供 escaped source fallback，不白屏、不 crash。
+- 任意 raw HTML/script、惡意 URL、path traversal 與非 allowlisted local resource 無法執行或讀取；renderer 不透過 CDN 載入資源。
+
 ### Query
 
 - 可查單一 repo 或兩個 repo。
@@ -509,7 +549,7 @@ vvwikiapp/
 
 ### Security
 
-- source repo、Git history、log 與 CI artifact 找不到 provider/Gemini private key；自用 APK 是否內含指定 key 視本案部署假設接受。
+- source repo、Git history、APK、log 與 CI artifact 找不到 provider/Gemini private key；使用者匯入的 SSH key 只在 app-private storage。
 - log、backup、crash report 不含 token 或 Wiki 內容。
 - 使用者可在 app 內清除 cache 並知道如何 revoke token。
 - 確認 Gemini/Vertex AI 的資料處理條款後，才將工作 Wiki 開放給該 provider。
@@ -525,10 +565,9 @@ vvwikiapp/
 7. 第一版接受「離線 local tool search/read、線上 Gemini function-calling query」；真正離線的 Gemini/語意回答列為後續功能。
 8. 是否要保存 query history？預設建議關閉或只存在加密本機。
 
-## 14. 第一個可執行的 next step
+## 14. 下一個可執行的 next step
 
-1. 先完成 Phase 0 的 allowlist 與 Gemini data policy 決定。
-2. 在 `vvwikiapp` 建立 Android skeleton 與 fake provider 測試。
-3. 以 `vvdoc/wiki/` 與 `radoc/wiki/` 做第一批 fixture，確認同步、chunk、citation。
-4. 以 `/mnt/ssd/vvdoc/key/id_rsa` 驗證 Android SSH library，接上 GitHub/GitLab SSH sync；不要把 key 提交到 app repo。
-5. 接上 Gemini multi-key client（多行輸入、random selection、quota cooldown）與 local Wiki function-calling tools；BFF 暫不列入 MVP，且只讓 tool result 進入 Gemini context。
+1. 加入 Room/SQLite FTS5 metadata/chunk index，將目前直接掃檔案的 `search()` 改成索引查詢。
+2. 加入 WorkManager 的手動／啟動／背景同步 policy 與 retry/backoff。
+3. 用 fake provider、刪除/修改/大型檔案/惡意 Markdown 做整合測試。
+4. 接上 Gemini multi-key client（多行輸入、random selection、quota cooldown）與 local Wiki function-calling tools；BFF 暫不列入 MVP，且只讓 tool result 進入 Gemini context。

@@ -1,0 +1,56 @@
+# vv知識酷 Android
+
+可離線瀏覽兩個 Wiki 的 Android MVP（v0.1.1）。Markdown Reader 以
+`/mnt/ssd/github/Obsidian_mini` Wiki View 語法為相容性基準，Reader 為
+read-only，不會修改來源 Wiki。現在已加入 GitHub/GitLab 的 read-only SSH
+sync；預設同步兩個 remote 的 `wiki/`，不是把整個大型 repository clone 到手機。
+
+## 已可測試功能
+
+- `vvdoc`／`radoc` fixture 的 Library 瀏覽
+- Android file picker 匯入 Wiki 資料夾
+- 本機全文搜尋（中英文、repo filter、snippet、行號）
+- dark-only rendered Markdown 閱讀、頁內 Search、文字縮放（−／＋）、複製文字
+- headings、tables、task lists、code highlight、KaTeX、Mermaid、callout、
+  footnote、safe HTML subset、`[[wiki links]]` 與本機 note/image resource
+- back/forward navigation、fragment jump、外部 HTTP(S) link 交由瀏覽器開啟
+- path traversal、secret-looking path、任意 HTML/script 與 WebView network load
+  防護
+- 啟動時與手動 Git sync：`victorchentw/vvdoc@vv_note`、
+  `victor.chen.tw/ra_doc@main`；顯示 commit SHA、檔案數與錯誤狀態
+- JGit partial/blob-filter sync：只抓 `wiki/` allowlist blobs，處理刪除與
+  commit unchanged fast path；支援匯入 SSH private key
+
+## Build
+
+```bash
+./gradlew :app:assembleDebug
+```
+
+Release 必須由本機環境提供 wiki 紀錄的 signing material；secret 不在 repo：
+
+```bash
+export VVWIKI_SIGNING_STORE=/path/to/victor.keystore.jks
+export VVWIKI_SIGNING_PASSWORD='(from local secret store)'
+export VVWIKI_SIGNING_ALIAS=victor
+./gradlew :app:assembleRelease
+```
+
+Release task 會拒絕沒有 signing key 的 build。產物為
+`app/build/outputs/apk/release/app-release.apk`。
+
+Renderer source 在 `tools/renderer-source.js`；generated browser bundle 在
+`app/src/main/assets/web/markdown-renderer.js`。Bundle 使用 Obsidian_mini
+目前安裝的 markdown-it/plugin family 產生，APK 不依賴 CDN。
+
+## Security boundary
+
+- SSH private key 絕不放入 APK。首次使用請在 Settings 匯入；key 只存 app-private
+  storage（後續再加 Keystore-backed encryption），不進 Git、source、log 或 CI
+  artifact。APK 外流不會直接暴露 SSH key。
+- App 只做 SSH clone/fetch/read，不提供 push；host key 使用 bundled pinned
+  `known_hosts`，不使用 `StrictHostKeyChecking=no`。
+- Git sync 只 materialize allowlisted `wiki/` Markdown/text/image；`.git`、key、
+  credential、certificate 與 traversal paths 不進 offline cache。
+- Gemini function-calling、Room/FTS5 indexing 與 WorkManager 尚未實作。
+- 實際 release fingerprint 應以 `apksigner verify --print-certs` 驗證。
