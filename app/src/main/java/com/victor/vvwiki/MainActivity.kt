@@ -60,7 +60,6 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         window.statusBarColor = bg
         window.navigationBarColor = bg
-        applySystemUiForOrientation()
         repository = WikiRepository(this)
         gitSync = GitSync(this, repository)
         setContentView(buildRoot())
@@ -78,8 +77,9 @@ class MainActivity : Activity() {
     private fun applySystemUiForOrientation() {
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val decor = window.decorView
             window.setDecorFitsSystemWindows(false)
-            window.insetsController?.let { controller ->
+            decor.windowInsetsController?.let { controller ->
                 if (landscape) {
                     controller.hide(WindowInsets.Type.statusBars())
                     controller.systemBarsBehavior =

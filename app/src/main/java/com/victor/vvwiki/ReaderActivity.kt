@@ -75,7 +75,6 @@ class ReaderActivity : Activity() {
         window.navigationBarColor = bg
         repository = WikiRepository(this)
         gitSync = GitSync(this, repository)
-        applySystemUiForOrientation()
 
         val repo = savedInstanceState?.getString(STATE_REPO)
             ?: intent.getStringExtra(EXTRA_REPO) ?: "vvdoc"
@@ -130,8 +129,9 @@ class ReaderActivity : Activity() {
     private fun applySystemUiForOrientation() {
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val decor = window.decorView
             window.setDecorFitsSystemWindows(false)
-            window.insetsController?.let { controller ->
+            decor.windowInsetsController?.let { controller ->
                 if (landscape) {
                     controller.hide(WindowInsets.Type.statusBars())
                     controller.systemBarsBehavior =
