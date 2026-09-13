@@ -38,9 +38,9 @@ import java.util.Date
 class MainActivity : Activity() {
     private lateinit var repository: WikiRepository
     private lateinit var gitSync: GitSync
+    private lateinit var rootView: View
     private lateinit var content: FrameLayout
     private lateinit var status: TextView
-    private var librarySyncInfo: TextView? = null
     private var syncButton: Button? = null
     private var rescanButton: Button? = null
     private var loadingIndicator: ProgressBar? = null
@@ -72,10 +72,22 @@ class MainActivity : Activity() {
         window.navigationBarColor = bg
         repository = WikiRepository(this)
         gitSync = GitSync(this, repository)
-        setContentView(buildRoot())
+        rootView = buildRoot()
+        setContentView(rootView)
         showLibrary()
         if (repository.autoSyncOnLaunch()) {
             Handler(Looper.getMainLooper()).postDelayed({ startStartupSync() }, 700)
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        applySystemUiForOrientation()
+        if (::rootView.isInitialized) rootView.requestApplyInsets()
+        if (::content.isInitialized && currentScreen == Screen.LIBRARY) {
+            // Rebuild only the lightweight shell; retain the existing document rows.
+            libraryPage = null
+            showLibrary()
         }
     }
 
@@ -84,10 +96,7 @@ class MainActivity : Activity() {
         // Do not rebuild/rehash the whole Library when returning from Reader.
         // The previous implementation made the back gesture wait on every cached file.
         if (::repository.isInitialized && ::content.isInitialized && currentScreen == Screen.LIBRARY) {
-            if (libraryNeedsRefresh) showLibrary(forceRefresh = true) else {
-                librarySyncInfo?.text = syncSummary()
-                updateStatus(libraryStatus)
-            }
+            if (libraryNeedsRefresh) showLibrary(forceRefresh = true) else updateStatus(libraryStatus)
         }
     }
 
@@ -128,26 +137,21 @@ class MainActivity : Activity() {
                 insets
             }
         }
+        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         val toolbar = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(20), dp(13), dp(16), dp(11))
+            setPadding(dp(if (landscape) 14 else 20), dp(if (landscape) 5 else 13), dp(if (landscape) 12 else 16), dp(if (landscape) 5 else 11))
             background = roundedBackground(surface, 0)
             elevation = dp(3).toFloat()
         }
         val titleBlock = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val title = TextView(this).apply {
             text = getString(R.string.app_name)
-            textSize = 22f
+            textSize = if (landscape) 19f else 22f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(textColor)
         }
         titleBlock.addView(title)
-        titleBlock.addView(TextView(this).apply {
-            text = "OFFLINE KNOWLEDGE"
-            textSize = 10f
-            letterSpacing = 0.16f
-            setTextColor(accent)
-        })
         toolbar.addView(titleBlock, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         status = TextView(this).apply {
             textSize = 11f
@@ -158,7 +162,7 @@ class MainActivity : Activity() {
             setPadding(dp(10), dp(6), dp(10), dp(6))
             background = roundedBackground(card, 12, border)
         }
-        toolbar.addView(status, LinearLayout.LayoutParams(dp(142), dp(34)))
+        toolbar.addView(status, LinearLayout.LayoutParams(if (landscape) dp(118) else dp(142), if (landscape) dp(30) else dp(34)))
         root.addView(toolbar)
 
         content = FrameLayout(this)
@@ -208,50 +212,28 @@ class MainActivity : Activity() {
                 renderLibraryList(listContainer)
                 libraryNeedsRefresh = false
             } else {
-                librarySyncInfo?.text = syncSummary()
                 updateStatus(libraryStatus)
             }
             updateLoadingUi()
             return
         }
 
+        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(18), dp(20), 0)
+            val horizontal = if (landscape) 12 else 20
+            val vertical = if (landscape) 7 else 14
+            setPadding(dp(horizontal), dp(vertical), dp(horizontal), 0)
         }
-        page.addView(heading("Offline Library"))
-        page.addView(label("Your synced and imported Markdown, available offline."))
-        librarySyncInfo = label(syncSummary()).apply {
-            setPadding(0, dp(4), 0, dp(14))
-        }
-        page.addView(librarySyncInfo)
-
-        val controls = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(10), dp(4), dp(8), dp(4))
-            background = roundedBackground(surface, 16)
-        }
-        val spinner = repoSpinner { selectedRepo = it; renderLibraryList(listContainer) }
-        controls.addView(spinner, LinearLayout.LayoutParams(0, dp(48), 1f))
-        syncButton = button("Sync") { startSync() }
-        controls.addView(syncButton, LinearLayout.LayoutParams(dp(82), dp(44)).apply { leftMargin = dp(6) })
-        rescanButton = button("Rescan") { refreshAndNotify() }
-        controls.addView(rescanButton, LinearLayout.LayoutParams(dp(92), dp(44)).apply { leftMargin = dp(6) })
-        loadingIndicator = ProgressBar(this).apply {
-            isIndeterminate = true
-            visibility = View.GONE
-            contentDescription = "Loading"
-        }
-        controls.addView(loadingIndicator, LinearLayout.LayoutParams(dp(30), dp(30)).apply { leftMargin = dp(6) })
-        page.addView(controls, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) })
 
         val filter = EditText(this).apply {
             hint = "Filter documents by path…"
+            setText(libraryFilter)
             setHintTextColor(muted)
             setTextColor(textColor)
             setSingleLine(true)
-            setPadding(dp(14), 0, dp(14), 0)
-            background = roundedBackground(card, 14, border)
+            setPadding(dp(12), 0, dp(12), 0)
+            background = roundedBackground(card, 13, border)
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
@@ -261,22 +243,68 @@ class MainActivity : Activity() {
                 override fun afterTextChanged(s: Editable?) = Unit
             })
         }
-        page.addView(filter, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(4) })
 
+        val controls = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(if (landscape) 6 else 10), dp(if (landscape) 2 else 4), dp(if (landscape) 6 else 8), dp(if (landscape) 2 else 4))
+            background = roundedBackground(surface, 15)
+        }
+        val spinner = repoSpinner { repo ->
+            if (selectedRepo != repo) {
+                selectedRepo = repo
+                renderLibraryList(listContainer)
+            }
+        }
+        val controlHeight = if (landscape) 42 else 48
+        controls.addView(spinner, LinearLayout.LayoutParams(0, dp(controlHeight), 1f))
+        syncButton = button(if (landscape) "↻" else "Sync") { startSync() }.apply {
+            contentDescription = "Sync"
+        }
+        controls.addView(syncButton, LinearLayout.LayoutParams(dp(if (landscape) 44 else 82), dp(42)).apply { leftMargin = dp(5) })
+        rescanButton = button(if (landscape) "⟳" else "Rescan") { refreshAndNotify() }.apply {
+            contentDescription = "Rescan"
+        }
+        controls.addView(rescanButton, LinearLayout.LayoutParams(dp(if (landscape) 44 else 92), dp(42)).apply { leftMargin = dp(5) })
+        loadingIndicator = ProgressBar(this).apply {
+            isIndeterminate = true
+            visibility = View.GONE
+            contentDescription = "Loading"
+        }
+        controls.addView(loadingIndicator, LinearLayout.LayoutParams(dp(if (landscape) 26 else 30), dp(30)).apply { leftMargin = dp(5) })
+        if (landscape) {
+            controls.addView(filter, 1, LinearLayout.LayoutParams(0, dp(controlHeight), 1.15f).apply {
+                leftMargin = dp(6)
+            })
+        }
+        page.addView(controls, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            bottomMargin = dp(if (landscape) 6 else 8)
+        })
+        if (!landscape) {
+            page.addView(filter, LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(5) })
+        }
+
+        val hadExistingList = ::listContainer.isInitialized
+        val reusableList = if (hadExistingList) {
+            (listContainer.parent as? ViewGroup)?.removeView(listContainer)
+            listContainer
+        } else {
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(0, 0, 0, dp(28))
+            }
+        }
         val scroll = ScrollView(this).apply {
             clipToPadding = false
-            setPadding(0, dp(4), 0, 0)
+            isFillViewport = true
+            setPadding(0, dp(if (landscape) 0 else 4), 0, 0)
         }
-        listContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(0, 0, 0, dp(28))
-        }
+        listContainer = reusableList
         scroll.addView(listContainer)
         page.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         libraryPage = page
         content.removeAllViews()
         content.addView(page)
-        renderLibraryList(listContainer)
+        if (!hadExistingList || libraryNeedsRefresh) renderLibraryList(listContainer)
         libraryNeedsRefresh = false
         updateLoadingUi()
     }
@@ -291,8 +319,6 @@ class MainActivity : Activity() {
         val selected = if (selectedRepo == "All") null else selectedRepo
         val docs = repository.documents(selected)
             .filter { filter.isBlank() || it.path.lowercase().contains(filter) }
-        librarySyncInfo?.text = syncSummary()
-
         if (filter.isBlank()) {
             val pinned = repository.pinnedDocuments().filter { selected == null || it.repo == selected }
             val recent = repository.recentDocuments().filter { selected == null || it.repo == selected }

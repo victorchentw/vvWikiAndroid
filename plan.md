@@ -1,6 +1,6 @@
 # 個人 Wiki Android APK：雙 Repo 同步與 Gemini Query 計畫
 
-- **狀態**：Phase 1 已落地；Reader interaction、閱讀狀態、最近／Pin、Comments tab（查看／跳轉／修改／刪除註解與 remote branch 管理）、自動隱藏 reader chrome、註解 branch export、選取文字 TTS notification controls、可選啟動 sync/rescan 已加入；Room/FTS5、WorkManager 與 Gemini query 仍在後續階段。
+- **狀態**：Phase 1 已落地；Reader interaction、閱讀狀態、最近／Pin、Comments tab（查看／跳轉／修改／刪除註解與 remote branch 管理）、自動隱藏 reader chrome、orientation 保留頁面與 WebView、responsive landscape Library、註解 branch export、選取文字 TTS notification controls、可選啟動 sync/rescan 已加入；Room/FTS5、WorkManager 與 Gemini query 仍在後續階段。
 - **目標**：在 Android 手機上同步兩個個人 Wiki，支援離線瀏覽、完整 Markdown rendering、全文閱讀與搜尋，並以 Gemini 根據檢索到的內容回答問題、附上可點擊的來源。
 - **Markdown rendering 基準**：`/mnt/ssd/github/Obsidian_mini` 的 Wiki View；Android Reader 必須盡量維持相同語法、安全模型與瀏覽行為。
 - **工作目錄**：`/mnt/ssd/github/vvWikiAndroid`
@@ -8,7 +8,7 @@
 
 ## 0. 本次無人職守 implementation 結果
 
-- 已建立可安裝的原生 Android app（package `com.victor.vvwiki`、app name `vv知識酷`、version `0.1.13`）。
+- 已建立可安裝的原生 Android app（package `com.victor.vvwiki`、app name `vv知識酷`、version `0.1.14`）。
 - APK 不內建任何 Markdown／Wiki fixture；文件必須由 Git sync 或 file-picker import 取得。已完成 allowlist scan、離線全文搜尋、dark-only rendered Reader、頁內雙向 Search、文字／雙指縮放、table width constraint、safe-area／landscape status bar、rotation／persistent scroll、Wiki link／fragment 導覽與 Back/Forward。
 - Reader 使用 APK 內 bundled markdown-it/plugin renderer、KaTeX CSS/fonts、highlight.js 與 Mermaid；WebView network、任意 raw HTML/script、secret-looking path 與 traversal 已封鎖。
 - 已在 Android emulator 安裝 release APK，實測 Library、Reader、Search、line hint、Wiki link navigation、Back/Forward，logcat 無 app/WebView fatal error。
@@ -403,6 +403,7 @@ Reader 的呈現與行為 follow `/mnt/ssd/github/Obsidian_mini`；Wiki source �
 - Mermaid、KaTeX、highlight.js、CSS 與字型資源全部隨 APK 打包、離線可用；render error 顯示安全 escaped source／錯誤提示，不可白屏。
 - Reader 顯示 repo、relative path、commit SHA、同步時間；提供頁內 Search 上／下一筆、文字選取／複製、−／＋與雙指縮放、persistent scroll、最近／Pin、comment／question highlight，固定 dark theme；compact reader chrome 只在 touch 時淡入，閒置 2 秒後淡出且不佔閱讀內容空間。
 - Library 提供 Comments tab，列出所有本機 comment／question；可跳轉指定 highlight、修改／刪除單筆註解，並 upload 或刪除 remote comments branch。
+- Main／Reader orientation change 使用 configChanges 保留既有頁面與 WebView；Library 移除多餘 header，landscape 使用 compact command bar 與可滾動文件清單。
 - citation、FTS 搜尋結果與 backlink/source link 可用 `repo/path + heading/line range` 深連結開啟 Reader 並定位／highlight；行號映射以原始 Markdown 為準。
 - Android 建立由 `Obsidian_mini/test.md` 衍生的唯讀 rendering fixture/golden tests，覆蓋基礎文字到 Mermaid、KaTeX、embed、safe HTML 與惡意 payload；若 Android renderer 有意不相容，需在測試與文件中明列差異。
 

@@ -45,6 +45,7 @@ class ReaderActivity : Activity() {
 
     private lateinit var repository: WikiRepository
     private lateinit var gitSync: GitSync
+    private lateinit var readerRoot: View
     private lateinit var webView: WebView
     private lateinit var readerChrome: LinearLayout
     private lateinit var metadata: TextView
@@ -112,8 +113,18 @@ class ReaderActivity : Activity() {
         }
         history += current
         historyIndex = 0
-        setContentView(buildRoot())
+        readerRoot = buildRoot()
+        setContentView(readerRoot)
         loadLocation(current)
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        applySystemUiForOrientation()
+        if (::readerRoot.isInitialized) {
+            readerRoot.requestApplyInsets()
+            readerRoot.post { revealReaderChrome() }
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
