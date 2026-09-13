@@ -17,6 +17,7 @@ import android.os.Looper
 import android.view.ActionMode
 import android.view.Gravity
 import android.view.Menu
+import android.widget.FrameLayout
 import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
@@ -45,6 +46,7 @@ class ReaderActivity : Activity() {
     private lateinit var repository: WikiRepository
     private lateinit var gitSync: GitSync
     private lateinit var webView: WebView
+    private lateinit var readerChrome: LinearLayout
     private lateinit var metadata: TextView
     private lateinit var backButton: Button
     private lateinit var forwardButton: Button
@@ -63,7 +65,9 @@ class ReaderActivity : Activity() {
     private var searchInput: EditText? = null
     private var searchStatus: TextView? = null
     private val scrollHandler = Handler(Looper.getMainLooper())
+    private val chromeHandler = Handler(Looper.getMainLooper())
     private val saveScrollRunnable = Runnable { persistCurrentScroll() }
+    private val hideChromeRunnable = Runnable { setReaderChromeVisible(false) }
     private val processTargets = mutableMapOf<Int, ComponentName>()
     private var pendingSpeechForPermission: String? = null
 
@@ -132,6 +136,7 @@ class ReaderActivity : Activity() {
 
     override fun onDestroy() {
         scrollHandler.removeCallbacks(saveScrollRunnable)
+        chromeHandler.removeCallbacks(hideChromeRunnable)
         super.onDestroy()
     }
 
@@ -162,10 +167,7 @@ class ReaderActivity : Activity() {
     }
 
     private fun buildRoot(): View {
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(bg)
-        }
+        val root = FrameLayout(this).apply { setBackgroundColor(bg) }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             root.setOnApplyWindowInsetsListener { view, insets ->
                 val bars = insets.getInsets(WindowInsets.Type.systemBars())
@@ -178,55 +180,63 @@ class ReaderActivity : Activity() {
                 insets
             }
         }
+
+        readerChrome = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = roundedBackground(surface, 0)
+            elevation = dp(5).toFloat()
+        }
         val toolbar = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(8), dp(7), dp(8), dp(7))
-            background = roundedBackground(surface, 0)
-            elevation = dp(3).toFloat()
+            setPadding(dp(8), dp(3), dp(8), dp(3))
         }
         backButton = toolbarButton("‹") { goBack() }.apply {
             contentDescription = "Back"
-            textSize = 26f
+            textSize = 25f
         }
         forwardButton = toolbarButton("›") { goForward() }.apply {
             contentDescription = "Forward"
-            textSize = 26f
+            textSize = 25f
         }
         toolbar.addView(backButton, buttonParams())
         toolbar.addView(forwardButton, buttonParams())
         val title = TextView(this).apply {
             text = "Reader"
-            textSize = 17f
+            textSize = 16f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
             setTextColor(textColor)
             gravity = Gravity.CENTER_VERTICAL
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
         }
-        toolbar.addView(title, LinearLayout.LayoutParams(0, dp(52), 1f))
+        toolbar.addView(title, LinearLayout.LayoutParams(0, dp(44), 1f))
         toolbar.addView(toolbarButton("−") { adjustZoom(-10) }.apply {
             contentDescription = "Zoom out"
-            textSize = 22f
+            textSize = 21f
         }, toolbarActionParams())
         toolbar.addView(toolbarButton("+") { adjustZoom(10) }.apply {
             contentDescription = "Zoom in"
+            textSize = 21f
+        }, toolbarActionParams())
+        toolbar.addView(toolbarButton("✎") { showCommentsDialog() }.apply {
+            contentDescription = "Comments and questions"
+            textSize = 20f
+        }, toolbarActionParams())
+        toolbar.addView(toolbarButton("⌕") { showFindDialog() }.apply {
+            contentDescription = "Search in document"
             textSize = 22f
         }, toolbarActionParams())
-        toolbar.addView(toolbarButton("Notes") { showCommentsDialog() }.apply {
-            contentDescription = "Comments and questions"
-        }, notesButtonParams())
-        toolbar.addView(toolbarButton("Search") { showFindDialog() }.apply {
-            contentDescription = "Search in document"
-        }, searchButtonParams())
-        root.addView(toolbar)
+        readerChrome.addView(toolbar, LinearLayout.LayoutParams(-1, dp(50)))
 
         metadata = TextView(this).apply {
-            textSize = 11f
+            textSize = 10f
             setTextColor(muted)
-            setLineSpacing(0f, 1.1f)
-            setPadding(dp(16), dp(9), dp(16), dp(9))
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(dp(14), dp(2), dp(14), dp(6))
             setBackgroundColor(Color.rgb(15, 21, 29))
         }
-        root.addView(metadata, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT))
+        readerChrome.addView(metadata, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         webView = SelectionWebView(this).apply {
             setBackgroundColor(bg)
@@ -250,6 +260,15 @@ class ReaderActivity : Activity() {
             settings.textZoom = textZoom
             webViewClient = WikiWebViewClient()
             addJavascriptInterface(JsBridge(), "Android")
+            setOnTouchListener { _, event ->
+                when (event.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> revealReaderChrome()
+                    android.view.MotionEvent.ACTION_MOVE,
+                    android.view.MotionEvent.ACTION_UP,
+                    android.view.MotionEvent.ACTION_CANCEL -> scheduleReaderChromeHide()
+                }
+                false
+            }
             setOnScrollChangeListener { _, scrollY, _, _, _ ->
                 if (!restoringPosition) {
                     scrollPositions[locationKey(current)] = scrollY
@@ -258,10 +277,14 @@ class ReaderActivity : Activity() {
                 }
             }
         }
-        root.addView(webView, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(webView, FrameLayout.LayoutParams(-1, -1))
+        root.addView(readerChrome, FrameLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            gravity = Gravity.TOP
+        })
         root.post {
             applySystemUiForOrientation()
             root.requestApplyInsets()
+            revealReaderChrome()
         }
         updateNavigationButtons()
         return root
@@ -758,21 +781,67 @@ class ReaderActivity : Activity() {
 
     private fun findInputValue(): String? = searchInput?.text?.toString()?.takeIf { it.isNotBlank() }
     private fun locationKey(location: Location): String = "${location.repo}/${location.path}#${location.fragment}"
+    private fun revealReaderChrome() {
+        if (!::readerChrome.isInitialized) return
+        chromeHandler.removeCallbacks(hideChromeRunnable)
+        readerChrome.animate().cancel()
+        if (readerChrome.visibility != View.VISIBLE) {
+            readerChrome.visibility = View.VISIBLE
+            readerChrome.alpha = 0f
+            readerChrome.translationY = -dp(8).toFloat()
+        }
+        readerChrome.animate()
+            .alpha(1f)
+            .translationY(0f)
+            .setDuration(180)
+            .start()
+        scheduleReaderChromeHide()
+    }
+
+    private fun scheduleReaderChromeHide() {
+        if (!::readerChrome.isInitialized) return
+        chromeHandler.removeCallbacks(hideChromeRunnable)
+        chromeHandler.postDelayed(hideChromeRunnable, CHROME_IDLE_MS)
+    }
+
+    private fun setReaderChromeVisible(visible: Boolean) {
+        if (!::readerChrome.isInitialized) return
+        chromeHandler.removeCallbacks(hideChromeRunnable)
+        if (visible) {
+            revealReaderChrome()
+            return
+        }
+        if (readerChrome.visibility != View.VISIBLE) return
+        readerChrome.animate().cancel()
+        readerChrome.animate()
+            .alpha(0f)
+            .translationY(-dp(8).toFloat())
+            .setDuration(220)
+            .withEndAction { readerChrome.visibility = View.INVISIBLE }
+            .start()
+    }
+
     private fun toolbarButton(label: String, action: () -> Unit): Button = Button(this).apply {
         text = label
         textSize = 13f
         setAllCaps(false)
         setTextColor(textColor)
-        background = roundedBackground(card, 12, border)
+        background = toolbarButtonBackground()
+        gravity = Gravity.CENTER
         minWidth = 0
         minHeight = 0
-        setPadding(dp(3), 0, dp(3), 0)
-        setOnClickListener { action() }
+        setPadding(0, 0, 0, 0)
+        setOnClickListener {
+            revealReaderChrome()
+            action()
+        }
     }
-    private fun buttonParams() = LinearLayout.LayoutParams(dp(48), dp(52))
-    private fun toolbarActionParams() = LinearLayout.LayoutParams(dp(45), dp(52))
-    private fun notesButtonParams() = LinearLayout.LayoutParams(dp(62), dp(52))
-    private fun searchButtonParams() = LinearLayout.LayoutParams(dp(72), dp(52))
+    private fun toolbarButtonBackground() = android.graphics.drawable.StateListDrawable().apply {
+        addState(intArrayOf(android.R.attr.state_pressed), roundedBackground(card, 10))
+        addState(intArrayOf(), roundedBackground(Color.TRANSPARENT, 10))
+    }
+    private fun buttonParams() = LinearLayout.LayoutParams(dp(44), dp(44))
+    private fun toolbarActionParams() = LinearLayout.LayoutParams(dp(44), dp(44))
     private fun roundedBackground(fill: Int, radiusDp: Int, stroke: Int? = null): GradientDrawable =
         GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
@@ -855,6 +924,7 @@ class ReaderActivity : Activity() {
         private const val STATE_LINE = "reader.line"
         private const val STATE_FIND = "reader.find"
         private const val STATE_COMMENT_ID = "reader.commentId"
+        private const val CHROME_IDLE_MS = 5_000L
         private const val MENU_GROUP_PROCESS_TEXT = 7100
         private const val MENU_ADD_COMMENT = 7101
         private const val MENU_ADD_QUESTION = 7102
