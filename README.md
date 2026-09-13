@@ -1,6 +1,6 @@
 # vv知識酷 Android
 
-可離線瀏覽兩個 Wiki 的 Android MVP（v0.1.2）。Markdown Reader 以
+可離線瀏覽兩個 Wiki 的 Android MVP（v0.1.3）。Markdown Reader 以
 `/mnt/ssd/github/Obsidian_mini` Wiki View 語法為相容性基準，Reader 為
 read-only，不會修改來源 Wiki。現在已加入 GitHub/GitLab 的 read-only SSH
 sync；預設同步兩個 remote 的 `wiki/`，不是把整個大型 repository clone 到手機。
