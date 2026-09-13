@@ -8,7 +8,7 @@
 
 ## 0. 本次無人職守 implementation 結果
 
-- 已建立可安裝的原生 Android app（package `com.victor.vvwiki`、app name `vv知識酷`、version `0.1.14`）。
+- 已建立可安裝的原生 Android app（package `com.victor.vvwiki`、app name `vv知識酷`、version `0.1.15`）。
 - APK 不內建任何 Markdown／Wiki fixture；文件必須由 Git sync 或 file-picker import 取得。已完成 allowlist scan、離線全文搜尋、dark-only rendered Reader、頁內雙向 Search、文字／雙指縮放、table width constraint、safe-area／landscape status bar、rotation／persistent scroll、Wiki link／fragment 導覽與 Back/Forward。
 - Reader 使用 APK 內 bundled markdown-it/plugin renderer、KaTeX CSS/fonts、highlight.js 與 Mermaid；WebView network、任意 raw HTML/script、secret-looking path 與 traversal 已封鎖。
 - 已在 Android emulator 安裝 release APK，實測 Library、Reader、Search、line hint、Wiki link navigation、Back/Forward，logcat 無 app/WebView fatal error。
@@ -401,7 +401,7 @@ Reader 的呈現與行為 follow `/mnt/ssd/github/Obsidian_mini`；Wiki source �
 - Markdown fragment 與 portable anchor 可在頁內跳轉；Wiki link 點擊在 Reader 內導覽，保有 Back／Forward 與上一頁 scroll position。
 - 本機圖片與 note embed 只可讀 app-private allowlisted cache；阻擋 `..` traversal、`file://` 任意檔案、未允許 scheme 與 WebView network subresource。HTTPS/HTTP 一般連結交由 Android 外部瀏覽器確認後開啟。
 - Mermaid、KaTeX、highlight.js、CSS 與字型資源全部隨 APK 打包、離線可用；render error 顯示安全 escaped source／錯誤提示，不可白屏。
-- Reader 顯示 repo、relative path、commit SHA、同步時間；提供頁內 Search 上／下一筆、文字選取／複製、−／＋與雙指縮放、persistent scroll、最近／Pin、comment／question highlight，固定 dark theme；compact reader chrome 只在 touch 時淡入，閒置 2 秒後淡出且不佔閱讀內容空間。
+- Reader 顯示 repo、relative path、commit SHA、同步時間；提供頁內 Search 上／下一筆、文字選取／複製、−／＋與雙指縮放、persistent scroll、最近／Pin、comment／question highlight，固定 dark theme；compact reader chrome 位於閱讀頁底部，只在 touch 時淡入，閒置 2 秒後淡出且不佔閱讀內容空間。
 - Library 提供 Comments tab，列出所有本機 comment／question；可跳轉指定 highlight、修改／刪除單筆註解，並 upload 或刪除 remote comments branch。
 - Main／Reader orientation change 使用 configChanges 保留既有頁面與 WebView；Library 移除多餘 header，landscape 使用 compact command bar 與可滾動文件清單。
 - citation、FTS 搜尋結果與 backlink/source link 可用 `repo/path + heading/line range` 深連結開啟 Reader 並定位／highlight；行號映射以原始 Markdown 為準。

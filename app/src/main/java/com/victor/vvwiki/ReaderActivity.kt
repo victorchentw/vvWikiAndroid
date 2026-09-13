@@ -237,8 +237,6 @@ class ReaderActivity : Activity() {
             contentDescription = "Search in document"
             textSize = 22f
         }, toolbarActionParams())
-        readerChrome.addView(toolbar, LinearLayout.LayoutParams(-1, dp(50)))
-
         metadata = TextView(this).apply {
             textSize = 10f
             setTextColor(muted)
@@ -248,6 +246,7 @@ class ReaderActivity : Activity() {
             setBackgroundColor(Color.rgb(15, 21, 29))
         }
         readerChrome.addView(metadata, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT))
+        readerChrome.addView(toolbar, LinearLayout.LayoutParams(-1, dp(50)))
 
         webView = SelectionWebView(this).apply {
             setBackgroundColor(bg)
@@ -290,7 +289,7 @@ class ReaderActivity : Activity() {
         }
         root.addView(webView, FrameLayout.LayoutParams(-1, -1))
         root.addView(readerChrome, FrameLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            gravity = Gravity.TOP
+            gravity = Gravity.BOTTOM
         })
         root.post {
             applySystemUiForOrientation()
@@ -799,7 +798,7 @@ class ReaderActivity : Activity() {
         if (readerChrome.visibility != View.VISIBLE) {
             readerChrome.visibility = View.VISIBLE
             readerChrome.alpha = 0f
-            readerChrome.translationY = -dp(8).toFloat()
+            readerChrome.translationY = dp(8).toFloat()
         }
         readerChrome.animate()
             .alpha(1f)
@@ -826,7 +825,7 @@ class ReaderActivity : Activity() {
         readerChrome.animate().cancel()
         readerChrome.animate()
             .alpha(0f)
-            .translationY(-dp(8).toFloat())
+            .translationY(dp(8).toFloat())
             .setDuration(220)
             .withEndAction { readerChrome.visibility = View.INVISIBLE }
             .start()
