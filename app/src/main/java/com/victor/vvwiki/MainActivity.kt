@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -48,14 +49,19 @@ class MainActivity : Activity() {
     private var pendingImportRepo = "vvdoc"
     private var searchResultsContainer: LinearLayout? = null
     private var searchQuery = ""
+    private var libraryPage: View? = null
+    private var libraryNeedsRefresh = true
+    private var libraryStatus = "Ready"
 
     private enum class Screen { LIBRARY, SEARCH, SETTINGS }
 
-    private val bg = Color.rgb(16, 17, 24)
-    private val surface = Color.rgb(27, 29, 37)
-    private val textColor = Color.rgb(230, 231, 237)
-    private val muted = Color.rgb(167, 171, 184)
-    private val accent = Color.rgb(126, 180, 255)
+    private val bg = Color.rgb(11, 15, 20)
+    private val surface = Color.rgb(20, 28, 38)
+    private val card = Color.rgb(25, 35, 47)
+    private val border = Color.rgb(47, 62, 79)
+    private val textColor = Color.rgb(239, 244, 249)
+    private val muted = Color.rgb(157, 171, 185)
+    private val accent = Color.rgb(137, 194, 255)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -75,7 +81,10 @@ class MainActivity : Activity() {
         // Do not rebuild/rehash the whole Library when returning from Reader.
         // The previous implementation made the back gesture wait on every cached file.
         if (::repository.isInitialized && ::content.isInitialized && currentScreen == Screen.LIBRARY) {
-            librarySyncInfo?.text = syncSummary()
+            if (libraryNeedsRefresh) showLibrary(forceRefresh = true) else {
+                librarySyncInfo?.text = syncSummary()
+                updateStatus(libraryStatus)
+            }
         }
     }
 
@@ -118,34 +127,50 @@ class MainActivity : Activity() {
         }
         val toolbar = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(18), dp(14), dp(14), dp(10))
+            setPadding(dp(20), dp(13), dp(16), dp(11))
+            background = roundedBackground(surface, 0)
+            elevation = dp(3).toFloat()
         }
+        val titleBlock = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val title = TextView(this).apply {
             text = getString(R.string.app_name)
             textSize = 22f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(textColor)
         }
-        toolbar.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        titleBlock.addView(title)
+        titleBlock.addView(TextView(this).apply {
+            text = "OFFLINE KNOWLEDGE"
+            textSize = 10f
+            letterSpacing = 0.16f
+            setTextColor(accent)
+        })
+        toolbar.addView(titleBlock, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         status = TextView(this).apply {
-            textSize = 12f
+            textSize = 11f
             setTextColor(muted)
-            gravity = Gravity.END
+            gravity = Gravity.CENTER
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            background = roundedBackground(card, 12, border)
         }
-        toolbar.addView(status, LinearLayout.LayoutParams(dp(170), ViewGroup.LayoutParams.WRAP_CONTENT))
+        toolbar.addView(status, LinearLayout.LayoutParams(dp(142), dp(34)))
         root.addView(toolbar)
-
-        val nav = LinearLayout(this).apply {
-            setPadding(dp(12), 0, dp(12), dp(8))
-            setBackgroundColor(surface)
-        }
-        nav.addView(navButton("Library") { showLibrary() }, weightParams())
-        nav.addView(navButton("Search") { showSearch() }, weightParams())
-        nav.addView(navButton("Settings") { showSettings() }, weightParams())
-        root.addView(nav)
 
         content = FrameLayout(this)
         root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        val nav = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(7), dp(12), dp(7))
+            background = roundedBackground(surface, 0)
+            elevation = dp(4).toFloat()
+        }
+        nav.addView(navButton("▦\nLibrary") { showLibrary() }, weightParams())
+        nav.addView(navButton("⌕\nSearch") { showSearch() }, weightParams())
+        nav.addView(navButton("⚙\nSettings") { showSettings() }, weightParams())
+        root.addView(nav)
         root.post {
             applySystemUiForOrientation()
             root.requestApplyInsets()
@@ -155,46 +180,71 @@ class MainActivity : Activity() {
 
     private fun navButton(label: String, action: () -> Unit): Button = Button(this).apply {
         text = label
-        textSize = 13f
+        textSize = 12f
+        setAllCaps(false)
         setTextColor(textColor)
-        setBackgroundColor(Color.TRANSPARENT)
+        gravity = Gravity.CENTER
+        minHeight = 0
+        minWidth = 0
+        setPadding(0, 0, 0, 0)
+        background = roundedBackground(Color.TRANSPARENT, 14)
         setOnClickListener { action() }
     }
 
-    private fun showLibrary() {
+    private fun showLibrary(forceRefresh: Boolean = false) {
         currentScreen = Screen.LIBRARY
         searchResultsContainer = null
+        libraryPage?.let { cached ->
+            content.removeAllViews()
+            content.addView(cached)
+            if (forceRefresh || libraryNeedsRefresh) {
+                renderLibraryList(listContainer)
+                libraryNeedsRefresh = false
+            } else {
+                librarySyncInfo?.text = syncSummary()
+                updateStatus(libraryStatus)
+            }
+            updateLoadingUi()
+            return
+        }
+
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(14), dp(16), 0)
+            setPadding(dp(20), dp(18), dp(20), 0)
         }
         page.addView(heading("Offline Library"))
-        page.addView(label("Browse and read synced or imported Markdown without Gemini or network access."))
-        librarySyncInfo = label(syncSummary())
+        page.addView(label("Your synced and imported Markdown, available offline."))
+        librarySyncInfo = label(syncSummary()).apply {
+            setPadding(0, dp(4), 0, dp(14))
+        }
         page.addView(librarySyncInfo)
 
-        val controls = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        val controls = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), dp(4), dp(8), dp(4))
+            background = roundedBackground(surface, 16)
+        }
         val spinner = repoSpinner { selectedRepo = it; renderLibraryList(listContainer) }
         controls.addView(spinner, LinearLayout.LayoutParams(0, dp(48), 1f))
         syncButton = button("Sync") { startSync() }
-        controls.addView(syncButton, LinearLayout.LayoutParams(dp(82), dp(48)))
+        controls.addView(syncButton, LinearLayout.LayoutParams(dp(82), dp(44)).apply { leftMargin = dp(6) })
         rescanButton = button("Rescan") { refreshAndNotify() }
-        controls.addView(rescanButton, LinearLayout.LayoutParams(dp(92), dp(48)))
+        controls.addView(rescanButton, LinearLayout.LayoutParams(dp(92), dp(44)).apply { leftMargin = dp(6) })
         loadingIndicator = ProgressBar(this).apply {
             isIndeterminate = true
             visibility = View.GONE
             contentDescription = "Loading"
         }
-        controls.addView(loadingIndicator, LinearLayout.LayoutParams(dp(36), dp(36)))
-        page.addView(controls)
+        controls.addView(loadingIndicator, LinearLayout.LayoutParams(dp(30), dp(30)).apply { leftMargin = dp(6) })
+        page.addView(controls, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) })
 
         val filter = EditText(this).apply {
-            hint = "Filter by path…"
+            hint = "Filter documents by path…"
             setHintTextColor(muted)
             setTextColor(textColor)
             setSingleLine(true)
-            setPadding(dp(12), 0, dp(12), 0)
-            setBackgroundColor(surface)
+            setPadding(dp(14), 0, dp(14), 0)
+            background = roundedBackground(card, 14, border)
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
@@ -204,18 +254,23 @@ class MainActivity : Activity() {
                 override fun afterTextChanged(s: Editable?) = Unit
             })
         }
-        page.addView(filter, LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(6) })
+        page.addView(filter, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(4) })
 
-        val scroll = ScrollView(this)
+        val scroll = ScrollView(this).apply {
+            clipToPadding = false
+            setPadding(0, dp(4), 0, 0)
+        }
         listContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(8), 0, dp(24))
+            setPadding(0, 0, 0, dp(28))
         }
         scroll.addView(listContainer)
         page.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        libraryPage = page
         content.removeAllViews()
         content.addView(page)
         renderLibraryList(listContainer)
+        libraryNeedsRefresh = false
         updateLoadingUi()
     }
 
@@ -245,19 +300,22 @@ class MainActivity : Activity() {
             if (pinned.isNotEmpty() || recent.isNotEmpty()) container.addView(sectionLabel("All documents"))
         }
         if (docs.isEmpty()) {
-            container.addView(label("No documents match this filter."))
-            updateStatus("0 documents")
+            container.addView(emptyState("No documents match this filter.", "Sync a repository or import a local folder to get started."))
+            libraryStatus = "0 documents"
+            updateStatus(libraryStatus)
             return
         }
         docs.forEach { addDocumentRow(container, it) }
-        updateStatus("${docs.size} documents")
+        libraryStatus = "${docs.size} documents"
+        updateStatus(libraryStatus)
     }
 
     private fun addDocumentRow(container: LinearLayout, document: WikiRepository.Document) {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(10), dp(10), dp(10))
-            setBackgroundColor(surface)
+            setPadding(dp(16), dp(13), dp(10), dp(13))
+            background = roundedBackground(card, 16, border)
+            elevation = dp(1).toFloat()
             isClickable = true
             setOnClickListener { openReader(document.repo, document.path) }
         }
@@ -280,16 +338,17 @@ class MainActivity : Activity() {
             setTextColor(muted)
         })
         container.addView(row, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-            bottomMargin = dp(8)
+            bottomMargin = dp(10)
         })
     }
 
     private fun sectionLabel(value: String) = TextView(this).apply {
-        text = value
-        textSize = 14f
+        text = value.uppercase()
+        textSize = 12f
+        letterSpacing = 0.08f
         typeface = Typeface.DEFAULT_BOLD
-        setTextColor(muted)
-        setPadding(dp(4), dp(10), 0, dp(6))
+        setTextColor(accent)
+        setPadding(dp(4), dp(14), 0, dp(8))
     }
 
     private fun showSearch() {
@@ -297,18 +356,22 @@ class MainActivity : Activity() {
         searchResultsContainer = null
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(14), dp(16), 0)
+            setPadding(dp(20), dp(18), dp(20), 0)
         }
-        page.addView(heading("Offline Search"))
+        page.addView(heading("Search"))
         page.addView(label("Search local Markdown and text. Results never leave this device."))
-        val controls = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        val controls = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), dp(4), dp(8), dp(4))
+            background = roundedBackground(surface, 16)
+        }
         val query = EditText(this).apply {
             hint = "Search full text…"
             setHintTextColor(muted)
             setTextColor(textColor)
             setSingleLine(true)
-            setBackgroundColor(surface)
-            setPadding(dp(12), 0, dp(12), 0)
+            background = roundedBackground(card, 14, border)
+            setPadding(dp(14), 0, dp(12), 0)
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
@@ -320,12 +383,12 @@ class MainActivity : Activity() {
         }
         controls.addView(query, LinearLayout.LayoutParams(0, dp(48), 1f))
         val spinner = repoSpinner { selectedRepo = it; renderSearchResults() }
-        controls.addView(spinner, LinearLayout.LayoutParams(dp(118), dp(48)))
-        page.addView(controls)
-        val scroll = ScrollView(this)
+        controls.addView(spinner, LinearLayout.LayoutParams(dp(118), dp(48)).apply { leftMargin = dp(6) })
+        page.addView(controls, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
+        val scroll = ScrollView(this).apply { clipToPadding = false }
         searchResultsContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(10), 0, dp(24))
+            setPadding(0, dp(4), 0, dp(28))
         }
         scroll.addView(searchResultsContainer)
         page.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -340,21 +403,22 @@ class MainActivity : Activity() {
         container.removeAllViews()
         val query = searchQuery.trim()
         if (query.isBlank()) {
-            container.addView(label("Type a keyword to search headings, paths, and full document text."))
+            container.addView(emptyState("Search your offline library", "Type a keyword to search headings, paths, and full document text."))
             updateStatus("Ready")
             return
         }
         val results = repository.search(query, if (selectedRepo == "All") null else selectedRepo)
         if (results.isEmpty()) {
-            container.addView(label("No result for “$query”."))
+            container.addView(emptyState("No matches", "Nothing matched “$query”. Try a shorter keyword or another repository."))
             updateStatus("0 results")
             return
         }
         results.forEach { result ->
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(14), dp(12), dp(14), dp(12))
-                setBackgroundColor(surface)
+                setPadding(dp(16), dp(13), dp(16), dp(13))
+                background = roundedBackground(card, 16, border)
+                elevation = dp(1).toFloat()
                 setOnClickListener { openReader(result.document.repo, result.document.path, result.line, searchQuery) }
             }
             row.addView(TextView(this).apply {
@@ -370,7 +434,7 @@ class MainActivity : Activity() {
                 setTextColor(textColor)
                 maxLines = 3
             })
-            container.addView(row, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
+            container.addView(row, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) })
         }
         updateStatus("${results.size} results")
     }
@@ -380,17 +444,21 @@ class MainActivity : Activity() {
         searchResultsContainer = null
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(14), dp(16), dp(24))
+            setPadding(dp(20), dp(18), dp(20), dp(28))
         }
-        page.addView(heading("Settings & Import"))
+        page.addView(heading("Settings"))
         page.addView(label("The APK is read-only for wiki content. Import a local wiki folder with the Android file picker; only allowlisted Markdown/text/images are copied."))
+        page.addView(sectionLabel("Import & access"))
         page.addView(button("Import into vvdoc") { launchImport("vvdoc") }, fullButtonParams())
         page.addView(button("Import into radoc") { launchImport("radoc") }, fullButtonParams())
         page.addView(button("Import SSH private key") { launchSshKeyImport() }, fullButtonParams())
+        page.addView(sectionLabel("Sync"))
         val autoSync = CheckBox(this).apply {
             text = "Automatically sync + rescan when app opens"
             textSize = 14f
             setTextColor(textColor)
+            setPadding(dp(14), 0, dp(10), 0)
+            background = roundedBackground(card, 13, border)
             isChecked = repository.autoSyncOnLaunch()
             setOnCheckedChangeListener { _, enabled ->
                 repository.setAutoSyncOnLaunch(enabled)
@@ -414,7 +482,7 @@ class MainActivity : Activity() {
                 .setTitle("Clear offline cache?")
                 .setMessage("Synced and imported files will be removed. No Markdown fixtures are restored.")
                 .setNegativeButton("Cancel", null)
-                .setPositiveButton("Clear") { _, _ -> repository.resetLocalCache(); showLibrary(); toast("Local cache cleared") }
+                .setPositiveButton("Clear") { _, _ -> repository.resetLocalCache(); libraryNeedsRefresh = true; showLibrary(forceRefresh = true); toast("Local cache cleared") }
                 .show()
         }, fullButtonParams())
         val keyState = if (gitSync.hasConfiguredKey()) {
@@ -423,7 +491,7 @@ class MainActivity : Activity() {
             "No SSH key configured; import one above or build the personal APK with VVWIKI_SSH_KEY_PATH."
         }
         val autoSyncState = if (repository.autoSyncOnLaunch()) "Automatic sync + rescan on app open: enabled." else "Automatic sync + rescan on app open: disabled."
-        page.addView(label("\nSync\n• vvdoc: GitHub victorchentw/vvdoc @ vv_note (Markdown only)\n• radoc: GitLab victor.chen.tw/ra_doc @ main\n• No Markdown is bundled; sync/import is required before documents appear.\n• $keyState\n• $autoSyncState\n\nSecurity\n• WebView network loads and arbitrary HTML/scripts are blocked.\n• Imported key/certificate/credential-looking paths are skipped.\n• Reader is offline and dark-only; rendered text can be copied, annotated, and exported as a temporary comments branch."))
+        page.addView(infoCard("Sync status\n• vvdoc: GitHub victorchentw/vvdoc @ vv_note (Markdown only)\n• radoc: GitLab victor.chen.tw/ra_doc @ main\n• No Markdown is bundled; sync/import is required before documents appear.\n• $keyState\n• $autoSyncState\n\nSecurity\n• WebView network loads and arbitrary HTML/scripts are blocked.\n• Imported key/certificate/credential-looking paths are skipped.\n• Reader is offline and dark-only; rendered text can be copied, annotated, and exported as a temporary comments branch."))
         page.addView(button("Open Android app settings") {
             startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, UriCompat.packageUri(packageName)))
         }, fullButtonParams())
@@ -469,7 +537,8 @@ class MainActivity : Activity() {
             repository.importTree(uri, pendingImportRepo)
         }.onSuccess { count ->
             toast("Imported $count allowlisted files into $pendingImportRepo")
-            showLibrary()
+            libraryNeedsRefresh = true
+            showLibrary(forceRefresh = true)
         }.onFailure { error -> toast("Import failed: ${error.message ?: "unknown error"}") }
     }
 
@@ -483,7 +552,10 @@ class MainActivity : Activity() {
             runOnUiThread {
                 rescanInProgress = false
                 toast("Local index rescanned")
-                if (currentScreen == Screen.LIBRARY) showLibrary() else updateLoadingUi()
+                if (currentScreen == Screen.LIBRARY) showLibrary(forceRefresh = true) else {
+                    libraryNeedsRefresh = true
+                    updateLoadingUi()
+                }
             }
         }.start()
     }
@@ -513,7 +585,10 @@ class MainActivity : Activity() {
                 val ok = results.count { it.success }
                 val failed = results.size - ok
                 toast("Git sync: $ok updated, $failed failed")
-                if (currentScreen == Screen.LIBRARY) showLibrary() else updateStatus(syncSummary())
+                if (currentScreen == Screen.LIBRARY) showLibrary(forceRefresh = true) else {
+                    libraryNeedsRefresh = true
+                    updateStatus(syncSummary())
+                }
             }
         }.start()
     }
@@ -581,6 +656,8 @@ class MainActivity : Activity() {
         val values = arrayOf("All", "vvdoc", "radoc")
         adapter = android.widget.ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, values)
         setSelection(values.indexOf(selectedRepo).coerceAtLeast(0))
+        background = roundedBackground(card, 12, border)
+        setPadding(dp(10), 0, dp(4), 0)
         onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) { onChange(values[position]) }
@@ -589,29 +666,80 @@ class MainActivity : Activity() {
 
     private fun heading(value: String) = TextView(this).apply {
         text = value
-        textSize = 24f
+        textSize = 26f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(textColor)
-        setPadding(0, 0, 0, dp(4))
+        setPadding(0, 0, 0, dp(5))
     }
 
     private fun label(value: String) = TextView(this).apply {
         text = value
         textSize = 14f
         setTextColor(muted)
-        setPadding(0, dp(2), 0, dp(8))
+        setLineSpacing(0f, 1.12f)
+        setPadding(0, dp(2), 0, dp(9))
     }
+
+    private fun infoCard(value: String) = TextView(this).apply {
+        text = value
+        textSize = 13f
+        setTextColor(muted)
+        setLineSpacing(0f, 1.15f)
+        setPadding(dp(16), dp(15), dp(16), dp(15))
+        background = roundedBackground(card, 16, border)
+    }.apply {
+        layoutParams = LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(16)
+            bottomMargin = dp(8)
+        }
+    }
+
+    private fun emptyState(title: String, message: String) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(18), dp(18), dp(18), dp(18))
+        background = roundedBackground(card, 16, border)
+        addView(TextView(this@MainActivity).apply {
+            text = title
+            textSize = 16f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(textColor)
+        })
+        addView(TextView(this@MainActivity).apply {
+            text = message
+            textSize = 13f
+            setTextColor(muted)
+            setPadding(0, dp(6), 0, 0)
+        })
+    }.apply {
+        layoutParams = LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(10)
+            bottomMargin = dp(10)
+        }
+    }
+
+    private fun roundedBackground(fill: Int, radiusDp: Int, stroke: Int? = null): GradientDrawable =
+        GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(fill)
+            cornerRadius = dp(radiusDp).toFloat()
+            stroke?.let { setStroke(dp(1), it) }
+        }
 
     private fun button(value: String, action: () -> Unit) = Button(this).apply {
         text = value
         textSize = 13f
+        setAllCaps(false)
         setTextColor(textColor)
-        setBackgroundColor(surface)
+        minHeight = 0
+        minWidth = 0
+        setPadding(dp(10), 0, dp(10), 0)
+        background = roundedBackground(card, 13, border)
+        elevation = dp(1).toFloat()
         setOnClickListener { action() }
     }
 
-    private fun weightParams() = LinearLayout.LayoutParams(0, dp(44), 1f)
-    private fun fullButtonParams() = LinearLayout.LayoutParams(-1, dp(50)).apply { topMargin = dp(8) }
+    private fun weightParams() = LinearLayout.LayoutParams(0, dp(58), 1f)
+    private fun fullButtonParams() = LinearLayout.LayoutParams(-1, dp(52)).apply { topMargin = dp(8) }
     private fun updateStatus(value: String) { if (::status.isInitialized) status.text = value }
     private fun toast(value: String) = Toast.makeText(this, value, Toast.LENGTH_SHORT).show()
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()

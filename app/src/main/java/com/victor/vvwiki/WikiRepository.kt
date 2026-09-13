@@ -67,6 +67,8 @@ class WikiRepository(private val context: Context) {
     private val imageExtensions = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif")
     private val maxTextBytes = 20L * 1024L * 1024L
     private val maxImageBytes = 50L * 1024L * 1024L
+    private val documentCacheLock = Any()
+    private val documentCache = mutableMapOf<String, Document>()
 
     init {
         root.mkdirs()
@@ -93,6 +95,7 @@ class WikiRepository(private val context: Context) {
         }
         editor.apply()
         readerPrefs.edit().clear().apply()
+        invalidateDocumentCache()
     }
 
     fun saveReaderPosition(repo: String, path: String, y: Int, fraction: Float) {
@@ -232,6 +235,7 @@ class WikiRepository(private val context: Context) {
                 staging.copyRecursively(target, overwrite = true)
                 staging.deleteRecursively()
             }
+            invalidateDocumentCache(repo)
             prefs.edit()
                 .putString("sync-$repo-commit", commit)
                 .putLong("sync-$repo-time", System.currentTimeMillis())
@@ -254,14 +258,38 @@ class WikiRepository(private val context: Context) {
         val selected = if (repo == null || repo == "All") repos else listOf(repo)
         return selected.flatMap { id ->
             val base = File(root, id)
-            if (!base.isDirectory) emptyList() else base.walkTopDown()
-                .filter { it.isFile && isReadableText(it.name) && relativePath(base, it) != null }
-                .mapNotNull { file ->
-                    val path = relativePath(base, file) ?: return@mapNotNull null
-                    if (!isAllowedPath(path) || file.length() > maxTextBytes) return@mapNotNull null
-                    Document(id, path, file.length(), file.lastModified(), sha256(file))
+            if (!base.isDirectory) {
+                invalidateDocumentCache(id)
+                emptyList()
+            } else {
+                val seen = mutableSetOf<String>()
+                val result = base.walkTopDown()
+                    .filter { it.isFile && isReadableText(it.name) && relativePath(base, it) != null }
+                    .mapNotNull { file ->
+                        val path = relativePath(base, file) ?: return@mapNotNull null
+                        val bytes = file.length()
+                        if (!isAllowedPath(path) || bytes > maxTextBytes) return@mapNotNull null
+                        val key = documentEntry(id, path)
+                        seen += key
+                        val modified = file.lastModified()
+                        val cached = synchronized(documentCacheLock) { documentCache[key] }
+                        if (cached != null && cached.bytes == bytes && cached.modified == modified) {
+                            cached
+                        } else {
+                            Document(id, path, bytes, modified, sha256(file)).also { document ->
+                                synchronized(documentCacheLock) { documentCache[key] = document }
+                            }
+                        }
+                    }
+                    .toList()
+                synchronized(documentCacheLock) {
+                    documentCache.keys
+                        .filter { it.startsWith("$id\\t") && it !in seen }
+                        .toList()
+                        .forEach(documentCache::remove)
                 }
-                .toList()
+                result
+            }
         }.sortedWith(compareBy({ it.repo }, { it.path.lowercase(Locale.ROOT) }))
     }
 
@@ -348,6 +376,7 @@ class WikiRepository(private val context: Context) {
         val resolver = context.contentResolver
         val rootId = DocumentsContract.getTreeDocumentId(treeUri)
         val count = copyChildren(resolver, treeUri, rootId, File(root, repo), "", repo)
+        invalidateDocumentCache(repo)
         return count
     }
 
@@ -414,6 +443,19 @@ class WikiRepository(private val context: Context) {
     }
 
     private fun documentEntry(repo: String, path: String): String = "$repo\t$path"
+
+    private fun invalidateDocumentCache(repo: String? = null) {
+        synchronized(documentCacheLock) {
+            if (repo == null) {
+                documentCache.clear()
+            } else {
+                documentCache.keys
+                    .filter { it.startsWith("$repo\\t") }
+                    .toList()
+                    .forEach(documentCache::remove)
+            }
+        }
+    }
 
     private fun readEntryList(key: String): MutableList<String> {
         val raw = readerPrefs.getString(key, "[]") ?: "[]"

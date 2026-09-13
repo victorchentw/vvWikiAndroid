@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -65,11 +66,13 @@ class ReaderActivity : Activity() {
     private val processTargets = mutableMapOf<Int, ComponentName>()
     private var pendingSpeechForPermission: String? = null
 
-    private val bg = Color.rgb(16, 17, 24)
-    private val surface = Color.rgb(27, 29, 37)
-    private val textColor = Color.rgb(230, 231, 237)
-    private val muted = Color.rgb(167, 171, 184)
-    private val accent = Color.rgb(126, 180, 255)
+    private val bg = Color.rgb(11, 15, 20)
+    private val surface = Color.rgb(20, 28, 38)
+    private val card = Color.rgb(25, 35, 47)
+    private val border = Color.rgb(47, 62, 79)
+    private val textColor = Color.rgb(239, 244, 249)
+    private val muted = Color.rgb(157, 171, 185)
+    private val accent = Color.rgb(137, 194, 255)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -173,8 +176,9 @@ class ReaderActivity : Activity() {
         }
         val toolbar = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(6), dp(6), dp(6), dp(4))
-            setBackgroundColor(surface)
+            setPadding(dp(8), dp(7), dp(8), dp(7))
+            background = roundedBackground(surface, 0)
+            elevation = dp(3).toFloat()
         }
         backButton = toolbarButton("‹") { goBack() }.apply {
             contentDescription = "Back"
@@ -214,8 +218,9 @@ class ReaderActivity : Activity() {
         metadata = TextView(this).apply {
             textSize = 11f
             setTextColor(muted)
-            setPadding(dp(14), dp(7), dp(14), dp(7))
-            setBackgroundColor(Color.rgb(20, 22, 30))
+            setLineSpacing(0f, 1.1f)
+            setPadding(dp(16), dp(9), dp(16), dp(9))
+            setBackgroundColor(Color.rgb(15, 21, 29))
         }
         root.addView(metadata, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT))
 
@@ -744,9 +749,10 @@ class ReaderActivity : Activity() {
     private fun locationKey(location: Location): String = "${location.repo}/${location.path}#${location.fragment}"
     private fun toolbarButton(label: String, action: () -> Unit): Button = Button(this).apply {
         text = label
-        textSize = 14f
+        textSize = 13f
+        setAllCaps(false)
         setTextColor(textColor)
-        setBackgroundColor(Color.TRANSPARENT)
+        background = roundedBackground(card, 12, border)
         minWidth = 0
         minHeight = 0
         setPadding(dp(3), 0, dp(3), 0)
@@ -756,6 +762,13 @@ class ReaderActivity : Activity() {
     private fun toolbarActionParams() = LinearLayout.LayoutParams(dp(45), dp(52))
     private fun notesButtonParams() = LinearLayout.LayoutParams(dp(62), dp(52))
     private fun searchButtonParams() = LinearLayout.LayoutParams(dp(72), dp(52))
+    private fun roundedBackground(fill: Int, radiusDp: Int, stroke: Int? = null): GradientDrawable =
+        GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(fill)
+            cornerRadius = dp(radiusDp).toFloat()
+            stroke?.let { setStroke(dp(1), it) }
+        }
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
     private fun toast(value: String) = Toast.makeText(this, value, Toast.LENGTH_SHORT).show()
 
