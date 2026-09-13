@@ -52,6 +52,9 @@ class MainActivity : Activity() {
     private var pendingImportRepo = "vvdoc"
     private var searchResultsContainer: LinearLayout? = null
     private var searchQuery = ""
+    private var searchCacheKey: String? = null
+    private var searchCacheResults: List<WikiRepository.SearchResult> = emptyList()
+    private var commentsCache: List<WikiRepository.Comment>? = null
     private var libraryPage: View? = null
     private var libraryNeedsRefresh = true
     private var libraryStatus = "Ready"
@@ -84,10 +87,17 @@ class MainActivity : Activity() {
         super.onConfigurationChanged(newConfig)
         applySystemUiForOrientation()
         if (::rootView.isInitialized) rootView.requestApplyInsets()
-        if (::content.isInitialized && currentScreen == Screen.LIBRARY) {
-            // Rebuild only the lightweight shell; retain the existing document rows.
-            libraryPage = null
-            showLibrary()
+        if (::content.isInitialized) {
+            when (currentScreen) {
+                Screen.LIBRARY -> {
+                    // Rebuild only the lightweight shell; retain the existing document rows.
+                    libraryPage = null
+                    showLibrary()
+                }
+                Screen.SEARCH -> showSearch(focusQuery = false)
+                Screen.COMMENTS -> showComments()
+                Screen.SETTINGS -> Unit
+            }
         }
     }
 
@@ -95,8 +105,12 @@ class MainActivity : Activity() {
         super.onResume()
         // Do not rebuild/rehash the whole Library when returning from Reader.
         // The previous implementation made the back gesture wait on every cached file.
-        if (::repository.isInitialized && ::content.isInitialized && currentScreen == Screen.LIBRARY) {
-            if (libraryNeedsRefresh) showLibrary(forceRefresh = true) else updateStatus(libraryStatus)
+        if (::repository.isInitialized && ::content.isInitialized) {
+            when (currentScreen) {
+                Screen.LIBRARY -> if (libraryNeedsRefresh) showLibrary(forceRefresh = true) else updateStatus(libraryStatus)
+                Screen.COMMENTS -> showComments(forceRefresh = true)
+                else -> Unit
+            }
         }
     }
 
@@ -176,7 +190,7 @@ class MainActivity : Activity() {
         }
         nav.addView(navButton("▦", "Library") { showLibrary() }, weightParams())
         nav.addView(navButton("⌕", "Search") { showSearch() }, weightParams())
-        nav.addView(navButton("💬", "Comments") { showComments() }, weightParams())
+        nav.addView(navButton("💬", "Comments") { showComments(forceRefresh = true) }, weightParams())
         nav.addView(navButton("⚙", "Settings") { showSettings() }, weightParams())
         root.addView(nav)
         root.post {
@@ -384,27 +398,33 @@ class MainActivity : Activity() {
         setPadding(dp(4), dp(14), 0, dp(8))
     }
 
-    private fun showSearch() {
+    private fun showSearch(focusQuery: Boolean = true) {
         currentScreen = Screen.SEARCH
         searchResultsContainer = null
+        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(18), dp(20), 0)
+            val horizontal = if (landscape) 12 else 20
+            val vertical = if (landscape) 7 else 14
+            setPadding(dp(horizontal), dp(vertical), dp(horizontal), 0)
         }
-        page.addView(heading("Search"))
-        page.addView(label("Search local Markdown and text. Results never leave this device."))
+        if (!landscape) {
+            page.addView(heading("Search"))
+            page.addView(label("Search local Markdown and text. Results never leave this device."))
+        }
         val controls = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(10), dp(4), dp(8), dp(4))
-            background = roundedBackground(surface, 16)
+            setPadding(dp(if (landscape) 6 else 10), dp(if (landscape) 2 else 4), dp(if (landscape) 6 else 8), dp(if (landscape) 2 else 4))
+            background = roundedBackground(surface, 15)
         }
         val query = EditText(this).apply {
             hint = "Search full text…"
+            setText(searchQuery)
             setHintTextColor(muted)
             setTextColor(textColor)
             setSingleLine(true)
-            background = roundedBackground(card, 14, border)
-            setPadding(dp(14), 0, dp(12), 0)
+            background = roundedBackground(card, 13, border)
+            setPadding(dp(12), 0, dp(12), 0)
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
@@ -414,21 +434,32 @@ class MainActivity : Activity() {
                 override fun afterTextChanged(s: Editable?) = Unit
             })
         }
-        controls.addView(query, LinearLayout.LayoutParams(0, dp(48), 1f))
-        val spinner = repoSpinner { selectedRepo = it; renderSearchResults() }
-        controls.addView(spinner, LinearLayout.LayoutParams(dp(118), dp(48)).apply { leftMargin = dp(6) })
-        page.addView(controls, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(8) })
-        val scroll = ScrollView(this).apply { clipToPadding = false }
+        val spinner = repoSpinner { repo ->
+            if (selectedRepo != repo) {
+                selectedRepo = repo
+                renderSearchResults()
+            }
+        }
+        val controlHeight = if (landscape) 42 else 48
+        controls.addView(query, LinearLayout.LayoutParams(0, dp(controlHeight), 1f))
+        controls.addView(spinner, LinearLayout.LayoutParams(if (landscape) dp(104) else dp(118), dp(controlHeight)).apply { leftMargin = dp(6) })
+        page.addView(controls, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            bottomMargin = dp(if (landscape) 6 else 8)
+        })
+        val scroll = ScrollView(this).apply {
+            clipToPadding = false
+            isFillViewport = true
+        }
         searchResultsContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(4), 0, dp(28))
+            setPadding(0, dp(if (landscape) 0 else 4), 0, dp(28))
         }
         scroll.addView(searchResultsContainer)
         page.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         content.removeAllViews()
         content.addView(page)
         renderSearchResults()
-        query.requestFocus()
+        if (focusQuery) query.requestFocus()
     }
 
     private fun renderSearchResults() {
@@ -440,7 +471,15 @@ class MainActivity : Activity() {
             updateStatus("Ready")
             return
         }
-        val results = repository.search(query, if (selectedRepo == "All") null else selectedRepo)
+        val cacheKey = "$selectedRepo\u0000$query"
+        val results = if (searchCacheKey == cacheKey) {
+            searchCacheResults
+        } else {
+            repository.search(query, if (selectedRepo == "All") null else selectedRepo).also {
+                searchCacheKey = cacheKey
+                searchCacheResults = it
+            }
+        }
         if (results.isEmpty()) {
             container.addView(emptyState("No matches", "Nothing matched “$query”. Try a shorter keyword or another repository."))
             updateStatus("0 results")
@@ -472,42 +511,61 @@ class MainActivity : Activity() {
         updateStatus("${results.size} results")
     }
 
-    private fun showComments() {
+    private fun showComments(forceRefresh: Boolean = false) {
         currentScreen = Screen.COMMENTS
         searchResultsContainer = null
+        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(18), dp(20), dp(28))
+            val horizontal = if (landscape) 12 else 20
+            val vertical = if (landscape) 7 else 14
+            setPadding(dp(horizontal), dp(vertical), dp(horizontal), if (landscape) 0 else dp(20))
         }
-        page.addView(heading("Comments"))
-        page.addView(label("Notes and questions are stored locally and never change the Wiki source."))
-        page.addView(sectionLabel("Remote comments branch"))
+        if (!landscape) {
+            page.addView(heading("Comments"))
+            page.addView(label("Notes and questions are stored locally and never change the Wiki source."))
+        }
+        val remoteLabel = sectionLabel(if (landscape) "Remote branch" else "Remote comments branch")
+        if (landscape) remoteLabel.setPadding(dp(2), dp(2), 0, dp(4))
+        page.addView(remoteLabel)
         val remoteActions = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        remoteActions.addView(button("Upload branch") { exportCommentsToGit() }, LinearLayout.LayoutParams(0, dp(52), 1f).apply { rightMargin = dp(6) })
-        remoteActions.addView(button("Delete remote") {
+        val actionHeight = if (landscape) 42 else 52
+        remoteActions.addView(button(if (landscape) "Upload" else "Upload branch") { exportCommentsToGit() }, LinearLayout.LayoutParams(0, dp(actionHeight), 1f).apply { rightMargin = dp(6) })
+        remoteActions.addView(button(if (landscape) "Delete" else "Delete remote") {
             AlertDialog.Builder(this, AlertDialog.THEME_DEVICE_DEFAULT_DARK)
                 .setTitle("Delete remote comments branch?")
                 .setMessage("This deletes ${gitSync.commentsBranchName()} from both remotes. Local comments on this device will remain.")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Delete") { _, _ -> deleteCommentsBranch() }
                 .show()
-        }, LinearLayout.LayoutParams(0, dp(52), 1f).apply { leftMargin = dp(6) })
-        page.addView(remoteActions)
-        page.addView(sectionLabel("Saved annotations"))
+        }, LinearLayout.LayoutParams(0, dp(actionHeight), 1f).apply { leftMargin = dp(6) })
+        page.addView(remoteActions, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            bottomMargin = dp(if (landscape) 4 else 0)
+        })
+        val savedLabel = sectionLabel("Saved annotations")
+        if (landscape) savedLabel.setPadding(dp(2), dp(4), 0, dp(4))
+        page.addView(savedLabel)
 
-        val scroll = ScrollView(this).apply { clipToPadding = false }
+        val scroll = ScrollView(this).apply {
+            clipToPadding = false
+            isFillViewport = true
+        }
         val list = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(4), 0, dp(28))
+            setPadding(0, dp(if (landscape) 0 else 4), 0, dp(28))
         }
-        val comments = repository.allComments()
+        val comments = if (!forceRefresh && commentsCache != null) {
+            commentsCache!!
+        } else {
+            repository.allComments().also { commentsCache = it }
+        }
         if (comments.isEmpty()) {
             list.addView(emptyState("No comments yet", "Select text in Reader, then choose Add comment or Ask question."))
         } else {
             comments.forEach { comment -> list.addView(commentRow(comment)) }
         }
         scroll.addView(list)
-        page.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(4) })
+        page.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = if (landscape) 0 else dp(4) })
         content.removeAllViews()
         content.addView(page)
         updateStatus(if (comments.isEmpty()) "No annotations" else "${comments.size} annotations")
@@ -578,7 +636,7 @@ class MainActivity : Activity() {
             .setPositiveButton("Save") { _, _ ->
                 if (repository.updateComment(comment.id, input.text.toString())) {
                     toast("Comment updated")
-                    showComments()
+                    showComments(forceRefresh = true)
                 } else {
                     toast("Comment cannot be empty")
                 }
@@ -594,7 +652,7 @@ class MainActivity : Activity() {
             .setPositiveButton("Delete") { _, _ ->
                 if (repository.deleteComment(comment.id)) {
                     toast("Comment deleted")
-                    showComments()
+                    showComments(forceRefresh = true)
                 }
             }
             .show()
@@ -643,7 +701,13 @@ class MainActivity : Activity() {
                 .setTitle("Clear offline cache?")
                 .setMessage("Synced and imported files will be removed. No Markdown fixtures are restored.")
                 .setNegativeButton("Cancel", null)
-                .setPositiveButton("Clear") { _, _ -> repository.resetLocalCache(); libraryNeedsRefresh = true; showLibrary(forceRefresh = true); toast("Local cache cleared") }
+                .setPositiveButton("Clear") { _, _ ->
+                    repository.resetLocalCache()
+                    invalidateContentCaches()
+                    libraryNeedsRefresh = true
+                    showLibrary(forceRefresh = true)
+                    toast("Local cache cleared")
+                }
                 .show()
         }, fullButtonParams())
         val keyState = if (gitSync.hasConfiguredKey()) {
@@ -697,6 +761,7 @@ class MainActivity : Activity() {
             contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             repository.importTree(uri, pendingImportRepo)
         }.onSuccess { count ->
+            invalidateContentCaches()
             toast("Imported $count allowlisted files into $pendingImportRepo")
             libraryNeedsRefresh = true
             showLibrary(forceRefresh = true)
@@ -712,6 +777,7 @@ class MainActivity : Activity() {
             repository.documents()
             runOnUiThread {
                 rescanInProgress = false
+                invalidateContentCaches()
                 toast("Local index rescanned")
                 if (currentScreen == Screen.LIBRARY) showLibrary(forceRefresh = true) else {
                     libraryNeedsRefresh = true
@@ -743,6 +809,7 @@ class MainActivity : Activity() {
             }
             runOnUiThread {
                 syncInProgress = false
+                invalidateContentCaches()
                 val ok = results.count { it.success }
                 val failed = results.size - ok
                 toast("Git sync: $ok updated, $failed failed")
@@ -752,6 +819,12 @@ class MainActivity : Activity() {
                 }
             }
         }.start()
+    }
+
+    private fun invalidateContentCaches() {
+        searchCacheKey = null
+        searchCacheResults = emptyList()
+        commentsCache = null
     }
 
     private fun updateLoadingUi() {
