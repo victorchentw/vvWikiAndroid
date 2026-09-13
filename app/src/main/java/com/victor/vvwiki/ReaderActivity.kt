@@ -924,7 +924,7 @@ class ReaderActivity : Activity() {
         private const val STATE_LINE = "reader.line"
         private const val STATE_FIND = "reader.find"
         private const val STATE_COMMENT_ID = "reader.commentId"
-        private const val CHROME_IDLE_MS = 5_000L
+        private const val CHROME_IDLE_MS = 2_000L
         private const val MENU_GROUP_PROCESS_TEXT = 7100
         private const val MENU_ADD_COMMENT = 7101
         private const val MENU_ADD_QUESTION = 7102
