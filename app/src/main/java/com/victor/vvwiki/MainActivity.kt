@@ -264,10 +264,10 @@ class MainActivity : Activity() {
             setTextColor(accent)
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         val pinned = repository.isPinned(document.repo, document.path)
-        titleRow.addView(button(if (pinned) "Unpin" else "Pin") {
+        titleRow.addView(button(if (pinned) "📌" else "📍") {
             repository.togglePinned(document.repo, document.path)
             renderLibraryList(container)
-        }, LinearLayout.LayoutParams(dp(68), dp(42)))
+        }.apply { textSize = 18f }, LinearLayout.LayoutParams(dp(68), dp(42)))
         row.addView(titleRow)
         row.addView(TextView(this).apply {
             text = "${formatBytes(document.bytes)}  ·  ${formatTime(document.modified)}  ·  SHA-256 ${document.sha256.take(10)}…"
