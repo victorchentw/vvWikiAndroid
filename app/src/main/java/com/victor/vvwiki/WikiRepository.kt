@@ -7,9 +7,12 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
+import org.json.JSONArray
+import org.json.JSONObject
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.Locale
+import java.util.UUID
 
 /**
  * Small, deterministic offline wiki store.
@@ -42,8 +45,23 @@ class WikiRepository(private val context: Context) {
         val error: String?,
     )
 
+    data class ReaderPosition(val y: Int, val fraction: Float)
+
+    data class Comment(
+        val id: String,
+        val repo: String,
+        val path: String,
+        val type: String,
+        val quote: String,
+        val prefix: String,
+        val suffix: String,
+        val body: String,
+        val createdAt: Long,
+    )
+
     private val root = File(context.filesDir, "wiki-cache")
     private val prefs = context.getSharedPreferences("wiki-store", Context.MODE_PRIVATE)
+    private val readerPrefs = context.getSharedPreferences("reader-state", Context.MODE_PRIVATE)
     private val repos = listOf("vvdoc", "radoc")
     private val textExtensions = setOf("md", "markdown", "txt")
     private val imageExtensions = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif")
@@ -68,6 +86,99 @@ class WikiRepository(private val context: Context) {
                 .remove("sync-$repo-error")
         }
         editor.apply()
+        readerPrefs.edit().clear().apply()
+    }
+
+    fun saveReaderPosition(repo: String, path: String, y: Int, fraction: Float) {
+        if (repo !in repos || path.isBlank()) return
+        readerPrefs.edit()
+            .putInt(positionKey(repo, path), y.coerceAtLeast(0))
+            .putFloat(fractionKey(repo, path), fraction.coerceIn(0f, 1f))
+            .apply()
+    }
+
+    fun readerPosition(repo: String, path: String): ReaderPosition? {
+        if (repo !in repos || !readerPrefs.contains(positionKey(repo, path))) return null
+        return ReaderPosition(
+            readerPrefs.getInt(positionKey(repo, path), 0),
+            readerPrefs.getFloat(fractionKey(repo, path), 0f),
+        )
+    }
+
+    fun markRecentlyOpened(repo: String, path: String) {
+        if (repo !in repos || path.isBlank()) return
+        val entry = documentEntry(repo, path)
+        val values = readEntryList(RECENT_KEY).apply {
+            remove(entry)
+            add(0, entry)
+        }.take(MAX_RECENT)
+        writeEntryList(RECENT_KEY, values)
+    }
+
+    fun recentDocuments(limit: Int = MAX_RECENT): List<Document> =
+        documentsForEntries(readEntryList(RECENT_KEY), limit)
+
+    fun pinnedDocuments(): List<Document> = documentsForEntries(readEntryList(PINNED_KEY), Int.MAX_VALUE)
+
+    fun isPinned(repo: String, path: String): Boolean =
+        documentEntry(repo, path) in readEntryList(PINNED_KEY)
+
+    fun togglePinned(repo: String, path: String): Boolean {
+        if (repo !in repos || path.isBlank()) return false
+        val entry = documentEntry(repo, path)
+        val values = readEntryList(PINNED_KEY)
+        val pinned = if (values.remove(entry)) {
+            false
+        } else {
+            values.add(0, entry)
+            true
+        }
+        writeEntryList(PINNED_KEY, values)
+        return pinned
+    }
+
+    fun comments(repo: String, path: String): List<Comment> {
+        if (repo !in repos || path.isBlank()) return emptyList()
+        return parseComments(readerPrefs.getString(commentsKey(repo, path), "[]"))
+    }
+
+    fun commentsJson(repo: String, path: String): String = commentsToJson(comments(repo, path))
+
+    fun addComment(
+        repo: String,
+        path: String,
+        type: String,
+        quote: String,
+        prefix: String,
+        suffix: String,
+        body: String,
+    ): Comment {
+        require(repo in repos) { "Unknown repository" }
+        val comment = Comment(
+            id = "${System.currentTimeMillis()}-${UUID.randomUUID()}",
+            repo = repo,
+            path = path,
+            type = if (type == "question") "question" else "comment",
+            quote = quote,
+            prefix = prefix,
+            suffix = suffix,
+            body = body,
+            createdAt = System.currentTimeMillis(),
+        )
+        val values = comments(repo, path).toMutableList().apply { add(comment) }
+        readerPrefs.edit().putString(commentsKey(repo, path), commentsToJson(values)).apply()
+        return comment
+    }
+
+    fun commentsExportJson(repo: String): String {
+        val all = documents(repo).flatMap { comments(it.repo, it.path) }
+        return JSONObject().apply {
+            put("schema", 1)
+            put("app", "vv知識酷")
+            put("repository", repo)
+            put("exportedAt", System.currentTimeMillis())
+            put("comments", JSONArray(commentsToJson(all)))
+        }.toString(2)
     }
 
     fun syncStatus(repo: String): SyncStatus {
@@ -296,6 +407,67 @@ class WikiRepository(private val context: Context) {
         prefs.edit().remove("seed-installed").apply()
     }
 
+    private fun documentEntry(repo: String, path: String): String = "$repo\t$path"
+
+    private fun readEntryList(key: String): MutableList<String> {
+        val raw = readerPrefs.getString(key, "[]") ?: "[]"
+        return runCatching {
+            val array = JSONArray(raw)
+            MutableList(array.length()) { index -> array.optString(index) }.filter { it.isNotBlank() }.toMutableList()
+        }.getOrDefault(mutableListOf())
+    }
+
+    private fun writeEntryList(key: String, values: List<String>) {
+        val array = JSONArray()
+        values.forEach(array::put)
+        readerPrefs.edit().putString(key, array.toString()).apply()
+    }
+
+    private fun documentsForEntries(entries: List<String>, limit: Int): List<Document> {
+        val byEntry = documents().associateBy { documentEntry(it.repo, it.path) }
+        return entries.asSequence().mapNotNull { byEntry[it] }.take(limit).toList()
+    }
+
+    private fun positionKey(repo: String, path: String): String = "position:$repo:$path"
+    private fun fractionKey(repo: String, path: String): String = "fraction:$repo:$path"
+    private fun commentsKey(repo: String, path: String): String = "comments:$repo:$path"
+
+    private fun parseComments(raw: String?): List<Comment> = runCatching {
+        val array = JSONArray(raw ?: "[]")
+        MutableList(array.length()) { index ->
+            val item = array.getJSONObject(index)
+            Comment(
+                id = item.optString("id"),
+                repo = item.optString("repo"),
+                path = item.optString("path"),
+                type = item.optString("type", "comment"),
+                quote = item.optString("quote"),
+                prefix = item.optString("prefix"),
+                suffix = item.optString("suffix"),
+                body = item.optString("body"),
+                createdAt = item.optLong("createdAt"),
+            )
+        }
+    }.getOrDefault(emptyList())
+
+    private fun commentsToJson(values: List<Comment>): String {
+        val array = JSONArray()
+        values.forEach { comment ->
+            array.put(JSONObject().apply {
+                put("id", comment.id)
+                put("repo", comment.repo)
+                put("path", comment.path)
+                put("type", comment.type)
+                put("quote", comment.quote)
+                put("prefix", comment.prefix)
+                put("suffix", comment.suffix)
+                put("body", comment.body)
+                put("createdAt", comment.createdAt)
+            })
+        }
+        return array.toString()
+    }
+
     private fun safeFile(repo: String, path: String): File? {
         if (repo !in repos || !isAllowedPath(path)) return null
         val base = File(root, repo).canonicalFile
@@ -342,5 +514,11 @@ class WikiRepository(private val context: Context) {
             }
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    companion object {
+        private const val RECENT_KEY = "recent-documents"
+        private const val PINNED_KEY = "pinned-documents"
+        private const val MAX_RECENT = 12
     }
 }

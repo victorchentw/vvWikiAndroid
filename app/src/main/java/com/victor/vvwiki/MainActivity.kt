@@ -3,8 +3,10 @@ package com.victor.vvwiki
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -14,10 +16,13 @@ import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsets
+import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
@@ -31,7 +36,11 @@ class MainActivity : Activity() {
     private lateinit var content: FrameLayout
     private lateinit var status: TextView
     private var librarySyncInfo: TextView? = null
+    private var syncButton: Button? = null
+    private var rescanButton: Button? = null
+    private var loadingIndicator: ProgressBar? = null
     private var syncInProgress = false
+    private var rescanInProgress = false
     private var startupSyncAttempted = false
     private var currentScreen = Screen.LIBRARY
     private var selectedRepo = "All"
@@ -51,6 +60,7 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         window.statusBarColor = bg
         window.navigationBarColor = bg
+        applySystemUiForOrientation()
         repository = WikiRepository(this)
         gitSync = GitSync(this, repository)
         setContentView(buildRoot())
@@ -65,10 +75,41 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun applySystemUiForOrientation() {
+        val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false)
+            window.insetsController?.let { controller ->
+                if (landscape) {
+                    controller.hide(WindowInsets.Type.statusBars())
+                    controller.systemBarsBehavior =
+                        android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                } else {
+                    controller.show(WindowInsets.Type.statusBars())
+                }
+            }
+        } else if (landscape) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            window.decorView.systemUiVisibility =
+                View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            window.decorView.systemUiVisibility = 0
+        }
+    }
+
     private fun buildRoot(): View {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(bg)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            root.setOnApplyWindowInsetsListener { view, insets ->
+                val bars = insets.getInsets(WindowInsets.Type.systemBars())
+                val top = if (resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT) bars.top else 0
+                view.setPadding(view.paddingLeft, top, view.paddingRight, bars.bottom)
+                insets
+            }
         }
         val toolbar = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
@@ -100,6 +141,10 @@ class MainActivity : Activity() {
 
         content = FrameLayout(this)
         root.addView(content, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.post {
+            applySystemUiForOrientation()
+            root.requestApplyInsets()
+        }
         return root
     }
 
@@ -126,8 +171,16 @@ class MainActivity : Activity() {
         val controls = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         val spinner = repoSpinner { selectedRepo = it; renderLibraryList(listContainer) }
         controls.addView(spinner, LinearLayout.LayoutParams(0, dp(48), 1f))
-        controls.addView(button("Sync") { startSync() }, LinearLayout.LayoutParams(dp(92), dp(48)))
-        controls.addView(button("Rescan") { refreshAndNotify() }, LinearLayout.LayoutParams(dp(104), dp(48)))
+        syncButton = button("Sync") { startSync() }
+        controls.addView(syncButton, LinearLayout.LayoutParams(dp(82), dp(48)))
+        rescanButton = button("Rescan") { refreshAndNotify() }
+        controls.addView(rescanButton, LinearLayout.LayoutParams(dp(92), dp(48)))
+        loadingIndicator = ProgressBar(this).apply {
+            isIndeterminate = true
+            visibility = View.GONE
+            contentDescription = "Loading"
+        }
+        controls.addView(loadingIndicator, LinearLayout.LayoutParams(dp(36), dp(36)))
         page.addView(controls)
 
         val filter = EditText(this).apply {
@@ -158,6 +211,7 @@ class MainActivity : Activity() {
         content.removeAllViews()
         content.addView(page)
         renderLibraryList(listContainer)
+        updateLoadingUi()
     }
 
     private var libraryFilter = ""
@@ -167,38 +221,70 @@ class MainActivity : Activity() {
         if (!::listContainer.isInitialized || container !== listContainer) return
         container.removeAllViews()
         val filter = libraryFilter.trim().lowercase()
-        val docs = repository.documents(if (selectedRepo == "All") null else selectedRepo)
+        val selected = if (selectedRepo == "All") null else selectedRepo
+        val docs = repository.documents(selected)
             .filter { filter.isBlank() || it.path.lowercase().contains(filter) }
         librarySyncInfo?.text = syncSummary()
+
+        if (filter.isBlank()) {
+            val pinned = repository.pinnedDocuments().filter { selected == null || it.repo == selected }
+            val recent = repository.recentDocuments().filter { selected == null || it.repo == selected }
+            if (pinned.isNotEmpty()) {
+                container.addView(sectionLabel("Pinned"))
+                pinned.forEach { addDocumentRow(container, it) }
+            }
+            if (recent.isNotEmpty()) {
+                container.addView(sectionLabel("Continue reading"))
+                recent.forEach { addDocumentRow(container, it) }
+            }
+            if (pinned.isNotEmpty() || recent.isNotEmpty()) container.addView(sectionLabel("All documents"))
+        }
         if (docs.isEmpty()) {
             container.addView(label("No documents match this filter."))
             updateStatus("0 documents")
             return
         }
-        docs.forEach { document ->
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(14), dp(12), dp(14), dp(12))
-                setBackgroundColor(surface)
-                isClickable = true
-                setOnClickListener { openReader(document.repo, document.path) }
-            }
-            row.addView(TextView(this).apply {
-                text = "${document.repo} / ${document.path}"
-                textSize = 16f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(accent)
-            })
-            row.addView(TextView(this).apply {
-                text = "${formatBytes(document.bytes)}  ·  ${formatTime(document.modified)}  ·  SHA-256 ${document.sha256.take(10)}…"
-                textSize = 12f
-                setTextColor(muted)
-            })
-            container.addView(row, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                bottomMargin = dp(8)
-            })
-        }
+        docs.forEach { addDocumentRow(container, it) }
         updateStatus("${docs.size} documents")
+    }
+
+    private fun addDocumentRow(container: LinearLayout, document: WikiRepository.Document) {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(10), dp(10), dp(10))
+            setBackgroundColor(surface)
+            isClickable = true
+            setOnClickListener { openReader(document.repo, document.path) }
+        }
+        val titleRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        titleRow.addView(TextView(this).apply {
+            text = "${document.repo} / ${document.path}"
+            textSize = 16f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(accent)
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val pinned = repository.isPinned(document.repo, document.path)
+        titleRow.addView(button(if (pinned) "Unpin" else "Pin") {
+            repository.togglePinned(document.repo, document.path)
+            renderLibraryList(container)
+        }, LinearLayout.LayoutParams(dp(68), dp(42)))
+        row.addView(titleRow)
+        row.addView(TextView(this).apply {
+            text = "${formatBytes(document.bytes)}  ·  ${formatTime(document.modified)}  ·  SHA-256 ${document.sha256.take(10)}…"
+            textSize = 12f
+            setTextColor(muted)
+        })
+        container.addView(row, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            bottomMargin = dp(8)
+        })
+    }
+
+    private fun sectionLabel(value: String) = TextView(this).apply {
+        text = value
+        textSize = 14f
+        typeface = Typeface.DEFAULT_BOLD
+        setTextColor(muted)
+        setPadding(dp(4), dp(10), 0, dp(6))
     }
 
     private fun showSearch() {
@@ -297,6 +383,15 @@ class MainActivity : Activity() {
         page.addView(button("Import into radoc") { launchImport("radoc") }, fullButtonParams())
         page.addView(button("Import SSH private key") { launchSshKeyImport() }, fullButtonParams())
         page.addView(button("Sync vvdoc + radoc now") { startSync() }, fullButtonParams())
+        page.addView(button("Upload comments to Git branch") { exportCommentsToGit() }, fullButtonParams())
+        page.addView(button("Delete remote comments branch") {
+            AlertDialog.Builder(this, AlertDialog.THEME_DEVICE_DEFAULT_DARK)
+                .setTitle("Delete comments branch?")
+                .setMessage("This deletes ${gitSync.commentsBranchName()} from both remotes. Exported comments will remain only on this device.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Delete") { _, _ -> deleteCommentsBranch() }
+                .show()
+        }, fullButtonParams())
         page.addView(button("Clear local cache") {
             AlertDialog.Builder(this)
                 .setTitle("Clear offline cache?")
@@ -310,7 +405,7 @@ class MainActivity : Activity() {
         } else {
             "No SSH key configured; import one above or build the personal APK with VVWIKI_SSH_KEY_PATH."
         }
-        page.addView(label("\nSync\n• vvdoc: GitHub victorchentw/vvdoc @ vv_note (Markdown only)\n• radoc: GitLab victor.chen.tw/ra_doc @ main\n• No Markdown is bundled; sync/import is required before documents appear.\n• $keyState\n\nSecurity\n• WebView network loads and arbitrary HTML/scripts are blocked.\n• Imported key/certificate/credential-looking paths are skipped.\n• Reader is offline, dark-only and read-only; rendered text can be copied with Android text selection."))
+        page.addView(label("\nSync\n• vvdoc: GitHub victorchentw/vvdoc @ vv_note (Markdown only)\n• radoc: GitLab victor.chen.tw/ra_doc @ main\n• No Markdown is bundled; sync/import is required before documents appear.\n• $keyState\n\nSecurity\n• WebView network loads and arbitrary HTML/scripts are blocked.\n• Imported key/certificate/credential-looking paths are skipped.\n• Reader is offline and dark-only; rendered text can be copied, annotated, and exported as a temporary comments branch."))
         page.addView(button("Open Android app settings") {
             startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, UriCompat.packageUri(packageName)))
         }, fullButtonParams())
@@ -361,9 +456,18 @@ class MainActivity : Activity() {
     }
 
     private fun refreshAndNotify() {
-        repository.documents()
-        toast("Local index rescanned")
-        if (currentScreen == Screen.LIBRARY) showLibrary()
+        if (syncInProgress || rescanInProgress) return
+        rescanInProgress = true
+        updateLoadingUi()
+        updateStatus("Rescanning…")
+        Thread {
+            repository.documents()
+            runOnUiThread {
+                rescanInProgress = false
+                toast("Local index rescanned")
+                if (currentScreen == Screen.LIBRARY) showLibrary() else updateLoadingUi()
+            }
+        }.start()
     }
 
     private fun startStartupSync() {
@@ -373,13 +477,14 @@ class MainActivity : Activity() {
     }
 
     private fun startSync() {
-        if (syncInProgress) return
+        if (syncInProgress || rescanInProgress) return
         if (!gitSync.hasConfiguredKey()) {
             toast("No SSH key configured; import one in Settings or build with VVWIKI_SSH_KEY_PATH")
             showSettings()
             return
         }
         syncInProgress = true
+        updateLoadingUi()
         updateStatus("Syncing…")
         Thread {
             val results = gitSync.syncAll { message ->
@@ -391,6 +496,47 @@ class MainActivity : Activity() {
                 val failed = results.size - ok
                 toast("Git sync: $ok updated, $failed failed")
                 if (currentScreen == Screen.LIBRARY) showLibrary() else updateStatus(syncSummary())
+            }
+        }.start()
+    }
+
+    private fun updateLoadingUi() {
+        val busy = syncInProgress || rescanInProgress
+        syncButton?.isEnabled = !busy
+        rescanButton?.isEnabled = !busy
+        loadingIndicator?.visibility = if (busy) View.VISIBLE else View.GONE
+    }
+
+    private fun exportCommentsToGit() {
+        if (syncInProgress || rescanInProgress) {
+            toast("Wait for the current operation to finish")
+            return
+        }
+        if (!gitSync.hasConfiguredKey()) {
+            toast("No SSH key configured for comment export")
+            return
+        }
+        toast("Uploading ${gitSync.commentsBranchName()}…")
+        Thread {
+            val results = gitSync.exportCommentsBranch()
+            runOnUiThread {
+                val ok = results.count { it.success }
+                toast("Comments branch uploaded to $ok/${results.size} repositories")
+            }
+        }.start()
+    }
+
+    private fun deleteCommentsBranch() {
+        if (!gitSync.hasConfiguredKey()) {
+            toast("No SSH key configured for branch deletion")
+            return
+        }
+        toast("Deleting ${gitSync.commentsBranchName()}…")
+        Thread {
+            val results = gitSync.deleteCommentsBranch()
+            runOnUiThread {
+                val ok = results.count { it.success }
+                toast("Comments branch deleted from $ok/${results.size} repositories")
             }
         }.start()
     }

@@ -1,6 +1,6 @@
 # 個人 Wiki Android APK：雙 Repo 同步與 Gemini Query 計畫
 
-- **狀態**：Phase 1 已落地；Phase 2 的 read-only SSH Git sync MVP 已實作並驗證；Room/FTS5、WorkManager 與 Gemini query 仍在後續階段。
+- **狀態**：Phase 1 已落地；Reader interaction、閱讀狀態、最近／Pin、註解 branch export 已加入；Room/FTS5、WorkManager 與 Gemini query 仍在後續階段。
 - **目標**：在 Android 手機上同步兩個個人 Wiki，支援離線瀏覽、完整 Markdown rendering、全文閱讀與搜尋，並以 Gemini 根據檢索到的內容回答問題、附上可點擊的來源。
 - **Markdown rendering 基準**：`/mnt/ssd/github/Obsidian_mini` 的 Wiki View；Android Reader 必須盡量維持相同語法、安全模型與瀏覽行為。
 - **工作目錄**：`/mnt/ssd/github/vvWikiAndroid`
@@ -8,12 +8,12 @@
 
 ## 0. 本次無人職守 implementation 結果
 
-- 已建立可安裝的原生 Android app（package `com.victor.vvwiki`、app name `vv知識酷`、version `0.1.4`）。
-- APK 不內建任何 Markdown／Wiki fixture；文件必須由 Git sync 或 file-picker import 取得。已完成 allowlist scan、離線全文搜尋、dark-only rendered Reader、頁內 Search、文字縮放、Wiki link／fragment 導覽與 Back/Forward。
+- 已建立可安裝的原生 Android app（package `com.victor.vvwiki`、app name `vv知識酷`、version `0.1.5`）。
+- APK 不內建任何 Markdown／Wiki fixture；文件必須由 Git sync 或 file-picker import 取得。已完成 allowlist scan、離線全文搜尋、dark-only rendered Reader、頁內雙向 Search、文字／雙指縮放、table width constraint、safe-area／landscape status bar、rotation／persistent scroll、Wiki link／fragment 導覽與 Back/Forward。
 - Reader 使用 APK 內 bundled markdown-it/plugin renderer、KaTeX CSS/fonts、highlight.js 與 Mermaid；WebView network、任意 raw HTML/script、secret-looking path 與 traversal 已封鎖。
 - 已在 Android emulator 安裝 release APK，實測 Library、Reader、Search、line hint、Wiki link navigation、Back/Forward，logcat 無 app/WebView fatal error。
-- 已加入 GitHub/GitLab read-only SSH sync：啟動／手動同步、pinned known_hosts、commit SHA、錯誤狀態、key import，以及只抓 `wiki/` 的 JGit partial/blob-filter sync；`vvdoc` 只同步 Markdown，`radoc` 依 allowlist。實機已驗證。
-- 個人自用 signed APK 可由 `VVWIKI_SSH_KEY_PATH` 注入 SSH key；key 不進 Git/source，但不應分享含 key 的 APK。未提供 push。Gemini key/function-calling、Room/FTS5、WorkManager 尚未實作。
+- 已加入 GitHub/GitLab read-only SSH sync：啟動／手動同步、pinned known_hosts、commit SHA、錯誤狀態、key import，以及只抓 `wiki/` 的 JGit partial/blob-filter sync；`vvdoc` 只同步 Markdown，`radoc` 依 allowlist。Reader 註解經使用者明確操作後另輸出至 `vvwiki/android-comments` branch，並可在 Settings 刪除。實機已驗證。
+- 個人自用 signed APK 可由 `VVWIKI_SSH_KEY_PATH` 注入 SSH key；key 不進 Git/source，但不應分享含 key 的 APK。Wiki sync 不 push；只有註解 export／delete 使用固定 branch。Gemini key/function-calling、Room/FTS5、WorkManager 尚未實作。
 
 ## 1. 目前環境確認
 
@@ -65,7 +65,7 @@ GitHub: vvdoc                    GitLab: radoc
 
 - 個人 APK 可直接在啟動／手動 sync 使用 bundled key；這個 APK 不可分享，外流時立即 revoke/rotate key。
 - 無 key 的 debug／通用 APK 仍可由 Settings 匯入至 app-private storage；目前 at-rest Keystore 加密列為後續 hardening。
-- APK 只實作 clone/fetch/read，不提供 push；個人帳戶 SSH key 權限可能過大，若要額外隔離可改用各 repo 專用 read-only deploy key。
+- APK 的 Wiki sync 只實作 clone/fetch/read；註解 export/delete 是受使用者明確操作限制的固定 branch push。個人帳戶 SSH key 權限可能過大，若要額外隔離可改用各 repo 專用 read-only deploy key。
 - Gemini key 與 Git SSH key 是兩件事；Gemini MVP 採本機多 key pool，輸入格式與 `/mnt/ssd/github/mia_vocabulary` 類似，request 隨機選 key，遇到 quota 再換另一把。
 
 ### 不建議的方案
@@ -94,7 +94,7 @@ GitHub: vvdoc                    GitLab: radoc
 
 ### 第一版不做
 
-- 手機編輯、commit、push、merge 或 PR。
+- 手機編輯 Wiki source、merge 或 PR；Reader annotation 只寫 app-private comment records，另可 export 成暫存 branch，不會改寫 Wiki source。
 - 多使用者帳號與權限管理。
 - 完整 Git history 瀏覽。
 - PDF/DOCX/XLSX/PPTX/圖片的完整 OCR／內容抽取。
@@ -393,7 +393,7 @@ Gemini request 只送 local tools 明確讀取後的 functionResponse，不送�
 
 ### Markdown Reader
 
-Reader 的呈現與行為 follow `/mnt/ssd/github/Obsidian_mini`，但 MVP 是 **read-only**；不得把 Obsidian_mini 的 WYSIWYG 修改功能誤帶進 sync-only Android app。
+Reader 的呈現與行為 follow `/mnt/ssd/github/Obsidian_mini`；Wiki source 仍是 **read-only**，但 rendered text 可建立 app-private comment／question highlight，供明確 export 到暫存 branch。不得把 Obsidian_mini 的 WYSIWYG source 修改功能誤帶進 sync-only Android app。
 
 - 完整呈現 CommonMark/GFM 基礎：frontmatter（可收合 metadata）、H1–H6、段落、Unicode、inline formatting、blockquote、ordered/bullet/task list、table、horizontal rule、Markdown links/images、fenced/indented code。
 - 對齊 Obsidian_mini 擴充：`==mark==`、安全 `<mark>/<del>/<s>`、KaTeX inline/block math、Obsidian callouts、`::: type` containers、Mermaid、footnotes、sub/sup/ins、definition list、abbreviation、emoji、`<details>/<summary>` 與 bare `<a id>`；任意 raw HTML 維持停用／escape。
@@ -401,7 +401,7 @@ Reader 的呈現與行為 follow `/mnt/ssd/github/Obsidian_mini`，但 MVP 是 *
 - Markdown fragment 與 portable anchor 可在頁內跳轉；Wiki link 點擊在 Reader 內導覽，保有 Back／Forward 與上一頁 scroll position。
 - 本機圖片與 note embed 只可讀 app-private allowlisted cache；阻擋 `..` traversal、`file://` 任意檔案、未允許 scheme 與 WebView network subresource。HTTPS/HTTP 一般連結交由 Android 外部瀏覽器確認後開啟。
 - Mermaid、KaTeX、highlight.js、CSS 與字型資源全部隨 APK 打包、離線可用；render error 顯示安全 escaped source／錯誤提示，不可白屏。
-- Reader 顯示 repo、relative path、commit SHA、同步時間；提供頁內 Search、文字選取／複製、−／＋字級縮放，固定 dark theme。
+- Reader 顯示 repo、relative path、commit SHA、同步時間；提供頁內 Search 上／下一筆、文字選取／複製、−／＋與雙指縮放、persistent scroll、最近／Pin、comment／question highlight，固定 dark theme。
 - citation、FTS 搜尋結果與 backlink/source link 可用 `repo/path + heading/line range` 深連結開啟 Reader 並定位／highlight；行號映射以原始 Markdown 為準。
 - Android 建立由 `Obsidian_mini/test.md` 衍生的唯讀 rendering fixture/golden tests，覆蓋基礎文字到 Mermaid、KaTeX、embed、safe HTML 與惡意 payload；若 Android renderer 有意不相容，需在測試與文件中明列差異。
 
@@ -431,7 +431,7 @@ Reader 的呈現與行為 follow `/mnt/ssd/github/Obsidian_mini`，但 MVP 是 *
 - Git/Gemini credential 只存 Android Keystore 保護的加密資料；不要進 log、crash report、backup 或 analytics。
 - local Wiki cache 加密；敏感版本可使用 SQLCipher 或 app-level AES-GCM。
 - Android Auto Backup 排除 token、database key 與 Wiki cache，除非使用者明確同意。
-- App 僅呼叫 SSH Git 的 clone/fetch/read；目前個人 SSH key 可能具有帳號級寫入權限，若要求真正 read-only，改用 repo 專用 deploy key；API fallback 才使用最小 read-only scope。
+- Wiki sync 僅呼叫 SSH Git 的 clone/fetch/read；註解 branch export/delete 另呼叫 Git push。個人 SSH key 可能具有帳號級寫入權限，若要求真正 read-only sync，改用 repo 專用 deploy key；API fallback 才使用最小 read-only scope。
 - 本人專用 build 可故意包含指定的 SSH/Gemini key；但 key 必須由 ignored local path 在 build time 注入，不能提交到 source repo、log、backup 或 CI artifact。
 - APK 不包含任何未授權的其他 repository token、SSH key、keystore 或 certificate。
 - request 只送 local tools 明確回傳的必要片段，不送完整 repo；每輪 functionResponse 設大小與次數上限。
@@ -532,7 +532,7 @@ vvwikiapp/
 - 不設定 Gemini key、開啟飛航模式時，仍可依 repo/目錄瀏覽、全文搜尋並閱讀任何已同步且 allowlisted 的 Markdown／純文字檔。
 - Markdown rendering 通過由 `Obsidian_mini/test.md` 衍生的相容性 fixtures；至少涵蓋 table/task list、syntax highlight、KaTeX、Mermaid、callout、footnote、wiki link、note/image embed、fragment 與 safe HTML。
 - `[[wiki links]]`、一般相對 Markdown link、citation 與搜尋結果可開啟正確文件及 heading/line range；Back／Forward 能恢復閱讀位置。
-- Reader 支援 dark-only rendered view、頁內 Search、−／＋字級縮放、文字選取／複製；大型或 malformed 文件失敗時提供 escaped source fallback，不白屏、不 crash。
+- Reader 支援 dark-only rendered view、表格依 view 寬度限制、頁內 Search 上／下一筆、−／＋與雙指縮放、旋轉／下次開啟恢復位置、最近／Pin、文字選取／複製、comment／question highlight 與暫存 branch export；大型或 malformed 文件失敗時提供 escaped source fallback，不白屏、不 crash。
 - 任意 raw HTML/script、惡意 URL、path traversal 與非 allowlisted local resource 無法執行或讀取；renderer 不透過 CDN 載入資源。
 
 ### Query

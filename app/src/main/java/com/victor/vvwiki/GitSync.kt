@@ -61,6 +61,40 @@ class GitSync(
 
     fun hasConfiguredKey(): Boolean = ensureCredentials() != null
 
+    fun exportCommentsBranch(): List<Result> {
+        val credentials = ensureCredentials()
+        if (credentials == null) {
+            return remotes.map { Result(it.id, false, message = "No SSH key for comment export") }
+        }
+        installSshFactory(credentials.first, credentials.second)
+        return remotes.map { remote ->
+            runCatching {
+                pushComments(remote, wikiRepository.commentsExportJson(remote.id))
+                Result(remote.id, true, message = "Comments branch uploaded")
+            }.getOrElse { error ->
+                Result(remote.id, false, message = error.message ?: "Comment export failed")
+            }
+        }
+    }
+
+    fun deleteCommentsBranch(): List<Result> {
+        val credentials = ensureCredentials()
+        if (credentials == null) {
+            return remotes.map { Result(it.id, false, message = "No SSH key for branch deletion") }
+        }
+        installSshFactory(credentials.first, credentials.second)
+        return remotes.map { remote ->
+            runCatching {
+                deleteRemoteBranch(remote)
+                Result(remote.id, true, message = "Comments branch deleted")
+            }.getOrElse { error ->
+                Result(remote.id, false, message = error.message ?: "Branch deletion failed")
+            }
+        }
+    }
+
+    fun commentsBranchName(): String = COMMENTS_BRANCH
+
     fun importPrivateKey(uri: Uri): Boolean {
         credentialRoot.mkdirs()
         val temporary = File(credentialRoot, "id_rsa.importing")
@@ -106,6 +140,49 @@ class GitSync(
             }
         } finally {
             running.set(false)
+        }
+    }
+
+    private fun pushComments(remote: RemoteRepository, json: String) {
+        val directory = File(context.cacheDir, "vvwiki-comments-${remote.id}-${System.nanoTime()}")
+        directory.mkdirs()
+        val git = Git.init().setDirectory(directory).call()
+        try {
+            git.repository.config.setString("remote", "origin", "url", remote.remote)
+            git.repository.config.save()
+            File(directory, "vvwiki-comments.json").writeText(json, Charsets.UTF_8)
+            git.add().addFilepattern("vvwiki-comments.json").call()
+            git.commit()
+                .setAuthor("vv知識酷", "vvwiki@localhost")
+                .setCommitter("vv知識酷", "vvwiki@localhost")
+                .setMessage("Export Android Wiki comments")
+                .call()
+            val localBranch = git.repository.fullBranch?.removePrefix("refs/heads/") ?: "master"
+            git.push()
+                .setRemote("origin")
+                .setForce(true)
+                .setRefSpecs(RefSpec("refs/heads/$localBranch:refs/heads/$COMMENTS_BRANCH"))
+                .call()
+        } finally {
+            git.close()
+            directory.deleteRecursively()
+        }
+    }
+
+    private fun deleteRemoteBranch(remote: RemoteRepository) {
+        val directory = File(context.cacheDir, "vvwiki-delete-comments-${remote.id}-${System.nanoTime()}")
+        directory.mkdirs()
+        val git = Git.init().setDirectory(directory).call()
+        try {
+            git.repository.config.setString("remote", "origin", "url", remote.remote)
+            git.repository.config.save()
+            git.push()
+                .setRemote("origin")
+                .setRefSpecs(RefSpec(":refs/heads/$COMMENTS_BRANCH"))
+                .call()
+        } finally {
+            git.close()
+            directory.deleteRecursively()
         }
     }
 
@@ -286,5 +363,9 @@ class GitSync(
             session.setConfig("PreferredAuthentications", "publickey")
             session.timeout = 60_000
         }
+    }
+
+    companion object {
+        private const val COMMENTS_BRANCH = "vvwiki/android-comments"
     }
 }
