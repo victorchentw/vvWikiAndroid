@@ -1,6 +1,6 @@
 # vv知識酷 Android
 
-可離線瀏覽兩個 Wiki 的 Android MVP（v0.1.7）。Markdown Reader 以
+可離線瀏覽兩個 Wiki 的 Android MVP（v0.1.8）。Markdown Reader 以
 `/mnt/ssd/github/Obsidian_mini` Wiki View 語法為相容性基準，Reader 為
 Reader 不會直接修改來源 Wiki；註解可另存到明確指定的暫存 Git branch。現在已加入
 GitHub/GitLab 的 read-only SSH sync；預設同步兩個 remote 的 `wiki/`，不是把整個大型
@@ -14,7 +14,7 @@ repository clone 到手機。
 - dark-only rendered Markdown 閱讀、頁內 Search（上一筆／下一筆與暗色高亮）、文字縮放（−／＋）與雙指縮放
 - portrait safe-area、landscape 隱藏 status bar、旋轉後恢復閱讀位置；文件位置會保存供下次開啟
 - 最近閱讀與 Pin 快速入口；表格會依目前 WebView 寬度限制並換行
-- 長壓文字可使用系統 Process Text 選單（例如翻譯），也可加入 comment／question，高亮後從 Notes 查閱
+- 長壓文字可使用系統 Process Text 選單（例如翻譯）、`🔊 TTS`；TTS notification 支援暫停／繼續、前後 10 秒、1.5× 與關閉，也可加入 comment／question，高亮後從 Notes 查閱
 - headings、tables、task lists、code highlight、KaTeX、Mermaid、callout、
   footnote、safe HTML subset、`[[wiki links]]` 與本機 note/image resource
 - back/forward navigation、fragment jump、外部 HTTP(S) link 交由瀏覽器開啟

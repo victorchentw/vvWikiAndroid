@@ -1,9 +1,11 @@
 package com.victor.vvwiki
 
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
 import android.net.Uri
@@ -28,7 +30,6 @@ import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -62,6 +63,7 @@ class ReaderActivity : Activity() {
     private val scrollHandler = Handler(Looper.getMainLooper())
     private val saveScrollRunnable = Runnable { persistCurrentScroll() }
     private val processTargets = mutableMapOf<Int, ComponentName>()
+    private var pendingSpeechForPermission: String? = null
 
     private val bg = Color.rgb(16, 17, 24)
     private val surface = Color.rgb(27, 29, 37)
@@ -267,14 +269,13 @@ class ReaderActivity : Activity() {
     private fun wrapSelectionCallback(original: ActionMode.Callback): ActionMode.Callback =
         object : ActionMode.Callback {
             override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
-                val created = original.onCreateActionMode(mode, menu)
-                if (created) addSelectionItems(menu)
-                return created
+                addSelectionItems(menu)
+                return original.onCreateActionMode(mode, menu)
             }
 
             override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean {
                 val prepared = original.onPrepareActionMode(mode, menu)
-                if (prepared) addSelectionItems(menu)
+                addSelectionItems(menu)
                 return prepared
             }
 
@@ -302,6 +303,13 @@ class ReaderActivity : Activity() {
                         }
                         return true
                     }
+                    item.itemId == MENU_TTS -> {
+                        selectedText { text ->
+                            mode.finish()
+                            speakSelectedText(text)
+                        }
+                        return true
+                    }
                 }
                 return original.onActionItemClicked(mode, item)
             }
@@ -316,20 +324,75 @@ class ReaderActivity : Activity() {
         menu.removeGroup(MENU_GROUP_PROCESS_TEXT)
         menu.removeItem(MENU_ADD_COMMENT)
         menu.removeItem(MENU_ADD_QUESTION)
-        menu.add(Menu.NONE, MENU_ADD_COMMENT, Menu.NONE, "Add comment")
-            .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
-        menu.add(Menu.NONE, MENU_ADD_QUESTION, Menu.NONE, "Ask question")
-            .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+        menu.removeItem(MENU_TTS)
+        menu.add(Menu.NONE, MENU_ADD_COMMENT, 0, "Add comment")
+            .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+        menu.add(Menu.NONE, MENU_ADD_QUESTION, 1, "Ask question")
+            .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+        menu.add(Menu.NONE, MENU_TTS, 2, "🔊 TTS")
+            .setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
         processTargets.clear()
         val processIntent = Intent(Intent.ACTION_PROCESS_TEXT)
             .addCategory(Intent.CATEGORY_DEFAULT)
             .setType("text/plain")
-        packageManager.queryIntentActivities(processIntent, 0).forEachIndexed { index, info ->
+        val activities = packageManager.queryIntentActivities(processIntent, 0)
+            .sortedWith(compareBy<android.content.pm.ResolveInfo>(
+                { selectionActionPriority(it.loadLabel(packageManager).toString()) },
+                { it.loadLabel(packageManager).toString().lowercase(Locale.ROOT) },
+            ))
+        activities.forEachIndexed { index, info ->
             val activity = info.activityInfo ?: return@forEachIndexed
+            val label = info.loadLabel(packageManager).toString()
             val id = MENU_PROCESS_BASE + index
             processTargets[id] = ComponentName(activity.packageName, activity.name)
-            menu.add(MENU_GROUP_PROCESS_TEXT, id, Menu.NONE, info.loadLabel(packageManager))
-                .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+            val order = when (selectionActionPriority(label)) {
+                0 -> 3 + index // Mia Explain
+                1 -> 20 + index // Mia Trans
+                else -> 100 + index
+            }
+            menu.add(MENU_GROUP_PROCESS_TEXT, id, order, label)
+                .setShowAsAction(if (selectionActionPriority(label) < 2) MenuItem.SHOW_AS_ACTION_IF_ROOM else MenuItem.SHOW_AS_ACTION_NEVER)
+        }
+    }
+
+    private fun selectionActionPriority(label: String): Int {
+        val normalized = label.lowercase(Locale.ROOT)
+        return when {
+            "mia explain" in normalized -> 0
+            "mia trans" in normalized -> 1
+            else -> 2
+        }
+    }
+
+    private fun speakSelectedText(text: String) {
+        val value = text.trim()
+        if (value.isBlank()) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingSpeechForPermission = value
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_TTS_NOTIFICATION)
+            return
+        }
+        startTtsService(value)
+    }
+
+    private fun startTtsService(text: String) {
+        val intent = TtsService.speakIntent(this, text)
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
+        }.onFailure { toast("Unable to start TTS: ${it.message ?: "unknown error"}") }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQUEST_TTS_NOTIFICATION) return
+        val text = pendingSpeechForPermission
+        pendingSpeechForPermission = null
+        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED && !text.isNullOrBlank()) {
+            startTtsService(text)
+        } else {
+            toast("Allow notifications to use TTS controls")
         }
     }
 
@@ -769,6 +832,8 @@ class ReaderActivity : Activity() {
         private const val MENU_GROUP_PROCESS_TEXT = 7100
         private const val MENU_ADD_COMMENT = 7101
         private const val MENU_ADD_QUESTION = 7102
+        private const val MENU_TTS = 7103
         private const val MENU_PROCESS_BASE = 7200
+        private const val REQUEST_TTS_NOTIFICATION = 7300
     }
 }

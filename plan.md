@@ -1,6 +1,6 @@
 # 個人 Wiki Android APK：雙 Repo 同步與 Gemini Query 計畫
 
-- **狀態**：Phase 1 已落地；Reader interaction、閱讀狀態、最近／Pin、註解 branch export 已加入；Room/FTS5、WorkManager 與 Gemini query 仍在後續階段。
+- **狀態**：Phase 1 已落地；Reader interaction、閱讀狀態、最近／Pin、註解 branch export、選取文字 TTS notification controls 已加入；Room/FTS5、WorkManager 與 Gemini query 仍在後續階段。
 - **目標**：在 Android 手機上同步兩個個人 Wiki，支援離線瀏覽、完整 Markdown rendering、全文閱讀與搜尋，並以 Gemini 根據檢索到的內容回答問題、附上可點擊的來源。
 - **Markdown rendering 基準**：`/mnt/ssd/github/Obsidian_mini` 的 Wiki View；Android Reader 必須盡量維持相同語法、安全模型與瀏覽行為。
 - **工作目錄**：`/mnt/ssd/github/vvWikiAndroid`
@@ -8,7 +8,7 @@
 
 ## 0. 本次無人職守 implementation 結果
 
-- 已建立可安裝的原生 Android app（package `com.victor.vvwiki`、app name `vv知識酷`、version `0.1.7`）。
+- 已建立可安裝的原生 Android app（package `com.victor.vvwiki`、app name `vv知識酷`、version `0.1.8`）。
 - APK 不內建任何 Markdown／Wiki fixture；文件必須由 Git sync 或 file-picker import 取得。已完成 allowlist scan、離線全文搜尋、dark-only rendered Reader、頁內雙向 Search、文字／雙指縮放、table width constraint、safe-area／landscape status bar、rotation／persistent scroll、Wiki link／fragment 導覽與 Back/Forward。
 - Reader 使用 APK 內 bundled markdown-it/plugin renderer、KaTeX CSS/fonts、highlight.js 與 Mermaid；WebView network、任意 raw HTML/script、secret-looking path 與 traversal 已封鎖。
 - 已在 Android emulator 安裝 release APK，實測 Library、Reader、Search、line hint、Wiki link navigation、Back/Forward，logcat 無 app/WebView fatal error。
@@ -532,7 +532,7 @@ vvwikiapp/
 - 不設定 Gemini key、開啟飛航模式時，仍可依 repo/目錄瀏覽、全文搜尋並閱讀任何已同步且 allowlisted 的 Markdown／純文字檔。
 - Markdown rendering 通過由 `Obsidian_mini/test.md` 衍生的相容性 fixtures；至少涵蓋 table/task list、syntax highlight、KaTeX、Mermaid、callout、footnote、wiki link、note/image embed、fragment 與 safe HTML。
 - `[[wiki links]]`、一般相對 Markdown link、citation 與搜尋結果可開啟正確文件及 heading/line range；Back／Forward 能恢復閱讀位置。
-- Reader 支援 dark-only rendered view、表格依 view 寬度限制、頁內 Search 上／下一筆、−／＋與雙指縮放、旋轉／下次開啟恢復位置、最近／Pin、文字選取／複製、comment／question highlight 與暫存 branch export；大型或 malformed 文件失敗時提供 escaped source fallback，不白屏、不 crash。
+- Reader 支援 dark-only rendered view、表格依 view 寬度限制、頁內 Search 上／下一筆、−／＋與雙指縮放、旋轉／下次開啟恢復位置、最近／Pin、文字選取／複製、comment／question highlight、選取文字 TTS 與 notification 暫停／前後 10 秒／1.5×／關閉控制、暫存 branch export；大型或 malformed 文件失敗時提供 escaped source fallback，不白屏、不 crash。
 - 任意 raw HTML/script、惡意 URL、path traversal 與非 allowlisted local resource 無法執行或讀取；renderer 不透過 CDN 載入資源。
 
 ### Query
