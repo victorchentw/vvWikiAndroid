@@ -1,6 +1,6 @@
 # 個人 Wiki Android APK：雙 Repo 同步與 Gemini Query 計畫
 
-- **狀態**：Phase 1 已落地；Reader interaction、閱讀狀態、最近／Pin、註解 branch export、選取文字 TTS notification controls 已加入；Room/FTS5、WorkManager 與 Gemini query 仍在後續階段。
+- **狀態**：Phase 1 已落地；Reader interaction、閱讀狀態、最近／Pin、註解 branch export、選取文字 TTS notification controls、可選啟動 sync/rescan 已加入；Room/FTS5、WorkManager 與 Gemini query 仍在後續階段。
 - **目標**：在 Android 手機上同步兩個個人 Wiki，支援離線瀏覽、完整 Markdown rendering、全文閱讀與搜尋，並以 Gemini 根據檢索到的內容回答問題、附上可點擊的來源。
 - **Markdown rendering 基準**：`/mnt/ssd/github/Obsidian_mini` 的 Wiki View；Android Reader 必須盡量維持相同語法、安全模型與瀏覽行為。
 - **工作目錄**：`/mnt/ssd/github/vvWikiAndroid`
@@ -8,7 +8,7 @@
 
 ## 0. 本次無人職守 implementation 結果
 
-- 已建立可安裝的原生 Android app（package `com.victor.vvwiki`、app name `vv知識酷`、version `0.1.8`）。
+- 已建立可安裝的原生 Android app（package `com.victor.vvwiki`、app name `vv知識酷`、version `0.1.9`）。
 - APK 不內建任何 Markdown／Wiki fixture；文件必須由 Git sync 或 file-picker import 取得。已完成 allowlist scan、離線全文搜尋、dark-only rendered Reader、頁內雙向 Search、文字／雙指縮放、table width constraint、safe-area／landscape status bar、rotation／persistent scroll、Wiki link／fragment 導覽與 Back/Forward。
 - Reader 使用 APK 內 bundled markdown-it/plugin renderer、KaTeX CSS/fonts、highlight.js 與 Mermaid；WebView network、任意 raw HTML/script、secret-looking path 與 traversal 已封鎖。
 - 已在 Android emulator 安裝 release APK，實測 Library、Reader、Search、line hint、Wiki link navigation、Back/Forward，logcat 無 app/WebView fatal error。
@@ -81,7 +81,7 @@ GitHub: vvdoc                    GitLab: radoc
 
 - 設定兩個 repository：provider、owner/project、repo、branch；使用 build-time bundled 或使用者匯入的個人 SSH key 做 sync-only 操作（clone/fetch/read）。
 - Gemini 設定頁可輸入多組 API key（每行一組或以逗號分隔），保存後每次 query 隨機調用。
-- 手動同步、啟動時檢查更新、可選的 Wi-Fi/充電時背景同步。
+- 手動同步、Settings 可選的啟動 sync + rescan（預設 off）；Wi-Fi/充電時背景同步仍待 WorkManager。
 - 以 commit SHA 判斷是否更新，只下載新增／修改檔案，處理刪除檔案。
 - 本機保存 Markdown／純文字與 metadata。
 - 離線搜尋與完整檔案閱讀；使用者不必經過 Gemini，也能自行瀏覽目錄、查詢全文、開啟並閱讀任一已同步 Wiki Markdown／純文字檔。

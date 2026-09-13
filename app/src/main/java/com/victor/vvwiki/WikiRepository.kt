@@ -75,6 +75,12 @@ class WikiRepository(private val context: Context) {
 
     fun repositoryIds(): List<String> = repos
 
+    fun autoSyncOnLaunch(): Boolean = prefs.getBoolean(AUTO_SYNC_ON_LAUNCH_KEY, false)
+
+    fun setAutoSyncOnLaunch(enabled: Boolean) {
+        prefs.edit().putBoolean(AUTO_SYNC_ON_LAUNCH_KEY, enabled).apply()
+    }
+
     fun resetLocalCache() {
         root.deleteRecursively()
         root.mkdirs()
@@ -519,6 +525,7 @@ class WikiRepository(private val context: Context) {
     companion object {
         private const val RECENT_KEY = "recent-documents"
         private const val PINNED_KEY = "pinned-documents"
+        private const val AUTO_SYNC_ON_LAUNCH_KEY = "auto-sync-on-launch"
         private const val MAX_RECENT = 12
     }
 }

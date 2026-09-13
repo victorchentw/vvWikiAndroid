@@ -19,6 +19,7 @@ import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -64,13 +65,17 @@ class MainActivity : Activity() {
         gitSync = GitSync(this, repository)
         setContentView(buildRoot())
         showLibrary()
-        Handler(Looper.getMainLooper()).postDelayed({ startStartupSync() }, 700)
+        if (repository.autoSyncOnLaunch()) {
+            Handler(Looper.getMainLooper()).postDelayed({ startStartupSync() }, 700)
+        }
     }
 
     override fun onResume() {
         super.onResume()
+        // Do not rebuild/rehash the whole Library when returning from Reader.
+        // The previous implementation made the back gesture wait on every cached file.
         if (::repository.isInitialized && ::content.isInitialized && currentScreen == Screen.LIBRARY) {
-            showLibrary()
+            librarySyncInfo?.text = syncSummary()
         }
     }
 
@@ -382,6 +387,18 @@ class MainActivity : Activity() {
         page.addView(button("Import into vvdoc") { launchImport("vvdoc") }, fullButtonParams())
         page.addView(button("Import into radoc") { launchImport("radoc") }, fullButtonParams())
         page.addView(button("Import SSH private key") { launchSshKeyImport() }, fullButtonParams())
+        val autoSync = CheckBox(this).apply {
+            text = "Automatically sync + rescan when app opens"
+            textSize = 14f
+            setTextColor(textColor)
+            isChecked = repository.autoSyncOnLaunch()
+            setOnCheckedChangeListener { _, enabled ->
+                repository.setAutoSyncOnLaunch(enabled)
+                toast(if (enabled) "Automatic sync enabled" else "Automatic sync disabled")
+            }
+        }
+        page.addView(autoSync, fullButtonParams())
+        page.addView(label("Default is off. Manual Sync is available here; Rescan is available in Library."))
         page.addView(button("Sync vvdoc + radoc now") { startSync() }, fullButtonParams())
         page.addView(button("Upload comments to Git branch") { exportCommentsToGit() }, fullButtonParams())
         page.addView(button("Delete remote comments branch") {
@@ -405,7 +422,8 @@ class MainActivity : Activity() {
         } else {
             "No SSH key configured; import one above or build the personal APK with VVWIKI_SSH_KEY_PATH."
         }
-        page.addView(label("\nSync\n• vvdoc: GitHub victorchentw/vvdoc @ vv_note (Markdown only)\n• radoc: GitLab victor.chen.tw/ra_doc @ main\n• No Markdown is bundled; sync/import is required before documents appear.\n• $keyState\n\nSecurity\n• WebView network loads and arbitrary HTML/scripts are blocked.\n• Imported key/certificate/credential-looking paths are skipped.\n• Reader is offline and dark-only; rendered text can be copied, annotated, and exported as a temporary comments branch."))
+        val autoSyncState = if (repository.autoSyncOnLaunch()) "Automatic sync + rescan on app open: enabled." else "Automatic sync + rescan on app open: disabled."
+        page.addView(label("\nSync\n• vvdoc: GitHub victorchentw/vvdoc @ vv_note (Markdown only)\n• radoc: GitLab victor.chen.tw/ra_doc @ main\n• No Markdown is bundled; sync/import is required before documents appear.\n• $keyState\n• $autoSyncState\n\nSecurity\n• WebView network loads and arbitrary HTML/scripts are blocked.\n• Imported key/certificate/credential-looking paths are skipped.\n• Reader is offline and dark-only; rendered text can be copied, annotated, and exported as a temporary comments branch."))
         page.addView(button("Open Android app settings") {
             startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, UriCompat.packageUri(packageName)))
         }, fullButtonParams())
@@ -471,9 +489,9 @@ class MainActivity : Activity() {
     }
 
     private fun startStartupSync() {
-        if (startupSyncAttempted) return
+        if (startupSyncAttempted || !repository.autoSyncOnLaunch()) return
         startupSyncAttempted = true
-        if (gitSync.hasConfiguredKey()) startSync()
+        if (gitSync.hasConfiguredKey()) startSync() else refreshAndNotify()
     }
 
     private fun startSync() {

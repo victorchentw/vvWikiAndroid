@@ -201,32 +201,26 @@ class TtsService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun buildNotification(message: String? = null): Notification {
-        val state = message ?: when {
-            chunks.isEmpty() -> "No text"
-            paused -> "Paused"
-            else -> "Speaking ${currentIndex + 1}/${chunks.size}"
-        }
-        val preview = chunks.getOrNull(currentIndex)?.replace('\n', ' ')?.take(90).orEmpty()
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentTitle("vv知識酷 · TTS · ${if (speed == 1.5f) "1.5×" else "1×"}")
-            .setContentText("$state  $preview")
+            .setContentTitle("vv知識酷 TTS")
+            .setContentText(message?.takeUnless { it == "Preparing…" })
             .setStyle(Notification.MediaStyle().setShowActionsInCompactView(0, 1, 2))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(Notification.CATEGORY_TRANSPORT)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
-            .addAction(action("Pause / Resume", ACTION_TOGGLE, REQUEST_TOGGLE))
-            .addAction(action("−10s", ACTION_BACK, REQUEST_BACK))
-            .addAction(action("+10s", ACTION_FORWARD, REQUEST_FORWARD))
-            .addAction(action(if (speed == 1.5f) "1×" else "1.5×", ACTION_SPEED, REQUEST_SPEED))
-            .addAction(action("Close", ACTION_CLOSE, REQUEST_CLOSE))
+            .addAction(action(if (paused) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause, "", ACTION_TOGGLE, REQUEST_TOGGLE))
+            .addAction(action(android.R.drawable.ic_media_rew, "", ACTION_BACK, REQUEST_BACK))
+            .addAction(action(android.R.drawable.ic_media_ff, "", ACTION_FORWARD, REQUEST_FORWARD))
+            .addAction(action(R.drawable.ic_speed, "", ACTION_SPEED, REQUEST_SPEED))
+            .addAction(action(android.R.drawable.ic_menu_close_clear_cancel, "", ACTION_CLOSE, REQUEST_CLOSE))
             .build()
     }
 
-    private fun action(title: String, action: String, requestCode: Int): Notification.Action =
+    private fun action(icon: Int, title: String, action: String, requestCode: Int): Notification.Action =
         Notification.Action.Builder(
-            null,
+            icon,
             title,
             PendingIntent.getService(
                 this,

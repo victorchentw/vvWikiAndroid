@@ -1,6 +1,6 @@
 # vv知識酷 Android
 
-可離線瀏覽兩個 Wiki 的 Android MVP（v0.1.8）。Markdown Reader 以
+可離線瀏覽兩個 Wiki 的 Android MVP（v0.1.9）。Markdown Reader 以
 `/mnt/ssd/github/Obsidian_mini` Wiki View 語法為相容性基準，Reader 為
 Reader 不會直接修改來源 Wiki；註解可另存到明確指定的暫存 Git branch。現在已加入
 GitHub/GitLab 的 read-only SSH sync；預設同步兩個 remote 的 `wiki/`，不是把整個大型
@@ -20,7 +20,7 @@ repository clone 到手機。
 - back/forward navigation、fragment jump、外部 HTTP(S) link 交由瀏覽器開啟
 - path traversal、secret-looking path、任意 HTML/script 與 WebView network load
   防護
-- 啟動時與手動 Git sync／rescan loading：`victorchentw/vvdoc@vv_note`、
+- 可在 Settings 開啟啟動時自動 Git sync + rescan（預設關閉），另有手動 Git sync／rescan loading：`victorchentw/vvdoc@vv_note`、
   `victor.chen.tw/ra_doc@main`；顯示 commit SHA、檔案數與錯誤狀態
 - JGit partial/blob-filter sync：`vvdoc` 只抓 `wiki/` 下 Markdown，`radoc` 依
   allowlist 抓取；處理刪除與 commit unchanged fast path
