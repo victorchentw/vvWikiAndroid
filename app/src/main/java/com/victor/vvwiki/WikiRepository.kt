@@ -52,24 +52,22 @@ class WikiRepository(private val context: Context) {
 
     init {
         root.mkdirs()
-        installSeedIfNeeded()
+        migrateLegacySeedCache()
     }
 
     fun repositoryIds(): List<String> = repos
 
-    fun resetAndInstallSeed() {
+    fun resetLocalCache() {
         root.deleteRecursively()
         root.mkdirs()
-        prefs.edit().remove("seed-installed").apply()
+        val editor = prefs.edit().remove("seed-installed")
         repos.forEach { repo ->
-            prefs.edit()
-                .remove("sync-$repo-commit")
+            editor.remove("sync-$repo-commit")
                 .remove("sync-$repo-time")
                 .remove("sync-$repo-files")
                 .remove("sync-$repo-error")
-                .apply()
         }
-        installSeedIfNeeded()
+        editor.apply()
     }
 
     fun syncStatus(repo: String): SyncStatus {
@@ -100,7 +98,7 @@ class WikiRepository(private val context: Context) {
                     val path = relativePath(checkout, source) ?: return@forEach
                     val canonical = source.canonicalFile
                     if (!canonical.path.startsWith(checkoutBase.path + File.separator)) return@forEach
-                    if (!isAllowedPath(path)) return@forEach
+                    if (!isAllowedSyncPath(repo, path)) return@forEach
                     val limit = if (isImage(path)) maxImageBytes else maxTextBytes
                     if (source.length() > limit) return@forEach
                     val destination = File(staging, path)
@@ -162,7 +160,12 @@ class WikiRepository(private val context: Context) {
             .toList()
     }
 
-    internal fun isAllowedSyncPath(path: String): Boolean = isAllowedPath(path)
+    /** GitHub vvdoc only needs Markdown; radoc keeps the normal wiki allowlist. */
+    internal fun isAllowedSyncPath(repo: String, path: String): Boolean {
+        if (!isAllowedPath(path)) return false
+        return repo != "vvdoc" || path.substringAfterLast('.', "").equals("md", ignoreCase = true)
+    }
+
     internal fun syncMaxBytes(path: String): Long = if (isImage(path)) maxImageBytes else maxTextBytes
 
     fun readText(repo: String, path: String): String? {
@@ -282,21 +285,15 @@ class WikiRepository(private val context: Context) {
         return copied
     }
 
-    private fun installSeedIfNeeded() {
-        if (prefs.getBoolean("seed-installed", false)) return
-        for (repo in repos) copyAssetTree("seed/$repo", File(root, repo))
-        prefs.edit().putBoolean("seed-installed", true).apply()
-    }
-
-    private fun copyAssetTree(assetPath: String, destination: File) {
-        val children = context.assets.list(assetPath).orEmpty()
-        if (children.isEmpty()) {
-            destination.parentFile?.mkdirs()
-            context.assets.open(assetPath).use { input -> FileOutputStream(destination).use { input.copyTo(it) } }
-            return
+    /** Remove fixture content left by versions before 0.1.2; new APKs contain no Markdown seed. */
+    private fun migrateLegacySeedCache() {
+        if (!prefs.getBoolean("seed-installed", false)) return
+        repos.forEach { repo ->
+            if (prefs.getString("sync-$repo-commit", null).isNullOrBlank()) {
+                File(root, repo).deleteRecursively()
+            }
         }
-        destination.mkdirs()
-        children.forEach { child -> copyAssetTree("$assetPath/$child", File(destination, child)) }
+        prefs.edit().remove("seed-installed").apply()
     }
 
     private fun safeFile(repo: String, path: String): File? {

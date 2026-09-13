@@ -1,13 +1,13 @@
 # vv知識酷 Android
 
-可離線瀏覽兩個 Wiki 的 Android MVP（v0.1.1）。Markdown Reader 以
+可離線瀏覽兩個 Wiki 的 Android MVP（v0.1.2）。Markdown Reader 以
 `/mnt/ssd/github/Obsidian_mini` Wiki View 語法為相容性基準，Reader 為
 read-only，不會修改來源 Wiki。現在已加入 GitHub/GitLab 的 read-only SSH
 sync；預設同步兩個 remote 的 `wiki/`，不是把整個大型 repository clone 到手機。
 
 ## 已可測試功能
 
-- `vvdoc`／`radoc` fixture 的 Library 瀏覽
+- `vvdoc`／`radoc` 同步後的 Library 瀏覽（APK 不內建 Markdown）
 - Android file picker 匯入 Wiki 資料夾
 - 本機全文搜尋（中英文、repo filter、snippet、行號）
 - dark-only rendered Markdown 閱讀、頁內 Search、文字縮放（−／＋）、複製文字
@@ -18,8 +18,8 @@ sync；預設同步兩個 remote 的 `wiki/`，不是把整個大型 repository 
   防護
 - 啟動時與手動 Git sync：`victorchentw/vvdoc@vv_note`、
   `victor.chen.tw/ra_doc@main`；顯示 commit SHA、檔案數與錯誤狀態
-- JGit partial/blob-filter sync：只抓 `wiki/` allowlist blobs，處理刪除與
-  commit unchanged fast path；支援匯入 SSH private key
+- JGit partial/blob-filter sync：`vvdoc` 只抓 `wiki/` 下 Markdown，`radoc` 依
+  allowlist 抓取；處理刪除與 commit unchanged fast path
 
 ## Build
 
@@ -33,6 +33,8 @@ Release 必須由本機環境提供 wiki 紀錄的 signing material；secret 不
 export VVWIKI_SIGNING_STORE=/path/to/victor.keystore.jks
 export VVWIKI_SIGNING_PASSWORD='(from local secret store)'
 export VVWIKI_SIGNING_ALIAS=victor
+# personal APK: bundle the SSH key so startup/manual sync works without import
+export VVWIKI_SSH_KEY_PATH=/mnt/ssd/vvdoc/key/id_rsa
 ./gradlew :app:assembleRelease
 ```
 
@@ -45,12 +47,13 @@ Renderer source 在 `tools/renderer-source.js`；generated browser bundle 在
 
 ## Security boundary
 
-- SSH private key 絕不放入 APK。首次使用請在 Settings 匯入；key 只存 app-private
-  storage（後續再加 Keystore-backed encryption），不進 Git、source、log 或 CI
-  artifact。APK 外流不會直接暴露 SSH key。
+- 這是個人自用 APK；可用 `VVWIKI_SSH_KEY_PATH` 將 SSH private key 注入 APK，
+  讓啟動／手動 sync 直接可用。key 不進 Git、source 或 log；不要把這個 APK
+  分享給別人，若外流要立即 revoke/rotate key。也可不注入，改在 Settings 匯入。
 - App 只做 SSH clone/fetch/read，不提供 push；host key 使用 bundled pinned
   `known_hosts`，不使用 `StrictHostKeyChecking=no`。
-- Git sync 只 materialize allowlisted `wiki/` Markdown/text/image；`.git`、key、
-  credential、certificate 與 traversal paths 不進 offline cache。
+- APK 不內建任何 Markdown／Wiki fixture。Git sync 只 materialize allowlisted `wiki/`
+  files；`vvdoc` 只同步 Markdown，`.git`、credential、certificate 與 traversal
+  paths 不進 offline cache。
 - Gemini function-calling、Room/FTS5 indexing 與 WorkManager 尚未實作。
 - 實際 release fingerprint 應以 `apksigner verify --print-certs` 驗證。

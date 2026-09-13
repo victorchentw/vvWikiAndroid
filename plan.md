@@ -8,12 +8,12 @@
 
 ## 0. 本次無人職守 implementation 結果
 
-- 已建立可安裝的原生 Android app（package `com.victor.vvwiki`、app name `vv知識酷`、version `0.1.1`）。
-- 已完成 local fixture、Android file-picker import、allowlist scan、離線全文搜尋、dark-only rendered Reader、頁內 Search、文字縮放、Wiki link／fragment 導覽與 Back/Forward。
+- 已建立可安裝的原生 Android app（package `com.victor.vvwiki`、app name `vv知識酷`、version `0.1.2`）。
+- APK 不內建任何 Markdown／Wiki fixture；文件必須由 Git sync 或 file-picker import 取得。已完成 allowlist scan、離線全文搜尋、dark-only rendered Reader、頁內 Search、文字縮放、Wiki link／fragment 導覽與 Back/Forward。
 - Reader 使用 APK 內 bundled markdown-it/plugin renderer、KaTeX CSS/fonts、highlight.js 與 Mermaid；WebView network、任意 raw HTML/script、secret-looking path 與 traversal 已封鎖。
 - 已在 Android emulator 安裝 release APK，實測 Library、Reader、Search、line hint、Wiki link navigation、Back/Forward，logcat 無 app/WebView fatal error。
-- 已加入 GitHub/GitLab read-only SSH sync：啟動／手動同步、pinned known_hosts、commit SHA、錯誤狀態、key import，以及只抓 `wiki/` 的 JGit partial/blob-filter sync；實機驗證取得 `vvdoc@vv_note` 與 `radoc@main`。
-- SSH private key 不放入 APK；使用者在 Settings 匯入後存於 app-private storage。未提供 push。Gemini key/function-calling、Room/FTS5、WorkManager 尚未實作。
+- 已加入 GitHub/GitLab read-only SSH sync：啟動／手動同步、pinned known_hosts、commit SHA、錯誤狀態、key import，以及只抓 `wiki/` 的 JGit partial/blob-filter sync；`vvdoc` 只同步 Markdown，`radoc` 依 allowlist。實機已驗證。
+- 個人自用 signed APK 可由 `VVWIKI_SSH_KEY_PATH` 注入 SSH key；key 不進 Git/source，但不應分享含 key 的 APK。未提供 push。Gemini key/function-calling、Room/FTS5、WorkManager 尚未實作。
 
 ## 1. 目前環境確認
 
@@ -61,16 +61,16 @@ GitHub: vvdoc                    GitLab: radoc
 
 ### Credential 策略（個人自用 APK）
 
-本案使用自己的 SSH private key，但 **secret 不得進 APK**；使用者在 Settings 透過 file picker 匯入，App 只保存在 app-private storage。實際測試確認 `/mnt/ssd/vvdoc/key/id_rsa` 可讀取 GitHub 的 `vvdoc` 與 GitLab 的 `ra_doc`，但該檔案不會進 APK。
+本案是個人自用 APK，沿用自己的 SSH private key。release 可由 `VVWIKI_SSH_KEY_PATH` 將 key 注入 APK，或在 Settings 匯入；key 絕不 commit 到 `vvWikiAndroid`、不寫入 log、不要上傳 CI artifact。`/mnt/ssd/vvdoc/key/id_rsa` 已驗證可讀取 GitHub 的 `vvdoc` 與 GitLab 的 `ra_doc`。
 
-- 第一版使用 Git SSH transport；key 只接受首次啟動／Settings 匯入，不使用電腦上的絕對路徑，也不做 build-time asset injection。
-- key 絕不 commit 到 `vvWikiAndroid`、不寫入 log、不要上傳 CI artifact；目前 at-rest Keystore 加密列為後續 hardening。
-- APK 只實作 clone/fetch/read，不提供 push；但個人帳戶 SSH key 的權限由 GitHub/GitLab 帳號決定，未必是真正的 repository read-only。若要額外隔離，日後改用各 repo 專用的 read-only deploy key；key 遺失時直接撤銷。
+- 個人 APK 可直接在啟動／手動 sync 使用 bundled key；這個 APK 不可分享，外流時立即 revoke/rotate key。
+- 無 key 的 debug／通用 APK 仍可由 Settings 匯入至 app-private storage；目前 at-rest Keystore 加密列為後續 hardening。
+- APK 只實作 clone/fetch/read，不提供 push；個人帳戶 SSH key 權限可能過大，若要額外隔離可改用各 repo 專用 read-only deploy key。
 - Gemini key 與 Git SSH key 是兩件事；Gemini MVP 採本機多 key pool，輸入格式與 `/mnt/ssd/github/mia_vocabulary` 類似，request 隨機選 key，遇到 quota 再換另一把。
 
 ### 不建議的方案
 
-- 不把 private key 或 Gemini key 提交到 source repo，也不把 secret 放進 APK；使用者匯入後只留在 app-private storage。
+- 不把 private key 或 Gemini key 提交到 source repo；個人 signed APK 可含 bundled SSH key，但不可分享或上傳。
 - 不把兩個 repo 全部內容每次 query 都送給 Gemini。
 - 不保存完整 `.git` history；以 shallow clone/fetch、sparse checkout 或等效方式保留最新內容。
 - 不把二進位檔、certificate、password 檔案送進 AI context。
@@ -79,7 +79,7 @@ GitHub: vvdoc                    GitLab: radoc
 
 ### 必做
 
-- 設定兩個 repository：provider、owner/project、repo、branch；使用使用者匯入的個人 SSH key 做 sync-only 操作（clone/fetch/read）。
+- 設定兩個 repository：provider、owner/project、repo、branch；使用 build-time bundled 或使用者匯入的個人 SSH key 做 sync-only 操作（clone/fetch/read）。
 - Gemini 設定頁可輸入多組 API key（每行一組或以逗號分隔），保存後每次 query 隨機調用。
 - 手動同步、啟動時檢查更新、可選的 Wi-Fi/充電時背景同步。
 - 以 commit SHA 判斷是否更新，只下載新增／修改檔案，處理刪除檔案。
@@ -106,9 +106,8 @@ GitHub: vvdoc                    GitLab: radoc
 
 ### `/mnt/ssd/vvdoc` 預設納入
 
-- `wiki/**/*.md`
-- `README.md` 與其他明確指定的 Markdown
-- 少量明確指定的原始 `.txt`，例如 `Andriod_MB66.txt`；大型原始檔放在較低檢索優先級
+- `wiki/**/*.md`（Android Git sync 只抓這類 Markdown）
+- README／其他非-`wiki/` 檔案與原始 `.txt` 不進 Android Git sync；若未來需要再另設 profile
 
 ### `/mnt/ssd/vvdoc` 預設排除
 
@@ -171,7 +170,7 @@ RepositoryProvider
 - `GitLabProvider`：SSH remote，例如 `git@gitlab.com:...`。
 - Android 使用 JGit SSH transport + modern JSch；已在 emulator 驗證 GitHub/GitLab SSH、pinned host keys 與 partial/blob-filter fetch。
 - 使用 shallow metadata fetch、blob:none 與 selected wiki blob fetch；不保存完整 Git history，也不把整個大型 repo checkout 到手機。
-- key 只能在第一次啟動／Settings 由 file picker 匯入至 app-private storage；Gradle 不讀取或打包 private key，Android runtime 不使用電腦上的絕對路徑。
+- 個人 release 可由 Gradle 從外部 `VVWIKI_SSH_KEY_PATH` 打包 key asset；key 不進 source/Git。無 key build 則由第一次啟動／Settings file picker 匯入至 app-private storage，Android runtime 不使用電腦上的絕對路徑。
 - app 內驗證 `github.com`、`gitlab.com` 的 pinned `known_hosts`；不可使用 `StrictHostKeyChecking=no`。
 - SSH key 不會送到 Gemini、BFF 或任何第三方 API。
 
@@ -445,7 +444,7 @@ Reader 的呈現與行為 follow `/mnt/ssd/github/Obsidian_mini`，但 MVP 是 *
 
 | 風險 | 對策 |
 |---|---|
-| APK 被反編譯取得 SSH key | SSH key 不進 APK；匯入後只在 app-private storage，遺失／外流時撤銷並換 key |
+| APK 被反編譯取得 SSH key | 個人 APK 明確接受此風險；不可分享／上傳，外流時立即撤銷並換 key |
 | APK 被反編譯取得 Gemini key | 自用 standalone build 可接受；設低 quota、可 rotate；對外發佈時改用 BFF |
 | private key/password 被同步 | allowlist、denylist、secret scan、binary 排除 |
 | 文件內 prompt injection | context delimiter、只讓 Gemini回答、禁止執行文件指令 |
@@ -489,14 +488,14 @@ vvwikiapp/
 
 - 建立 Compose app、repository settings、Room schema、encrypted cache。
 - 先完成 Library／Search、FTS5 與 read-only dark Markdown Reader，移植 Obsidian_mini 的 rendering syntax、Wiki navigation、安全限制及字級縮放。
-- 將 `/mnt/ssd/github/Obsidian_mini/test.md` 複製為不含敏感資料的 Android test fixture，建立 rendering smoke/golden tests與惡意 HTML/path traversal 測試。
-- 先用 local fixture 驗證可自行瀏覽、搜尋、開全文、Back／Forward、heading/line deep link 與完全離線 rendering，不接真實 SSH key。
+- 以 `/mnt/ssd/github/Obsidian_mini/test.md` 做外部 rendering smoke/golden test；不把 Markdown fixture 打包進 APK，並建立惡意 HTML/path traversal 測試。
+- 先用外部 test fixture 驗證 rendering，再以 Git sync 的真實 Markdown 驗證可瀏覽、搜尋、開全文、Back／Forward 與 heading/line deep link。
 
 ### Phase 2：Git provider sync
 
 - [x] GitHub `vvdoc` 的 SSH sync-only（`vv_note`）與 GitLab `radoc`（`main`）。
-- [x] Settings SSH key import、pinned known_hosts、read-only UI 與 sync status；private key 不進 APK。
-- [x] commit comparison、wiki-only partial/blob fetch、刪除處理與 allowlist materialization。
+- [x] Settings SSH key import、personal build SSH asset、pinned known_hosts、read-only UI 與 sync status。
+- [x] commit comparison、`vvdoc` Markdown-only partial/blob fetch、刪除處理與 allowlist materialization。
 - [ ] Room/SQLite FTS5、WorkManager/background policy、retry/backoff、fake provider integration tests。
 
 ### Phase 3：Query MVP
@@ -549,7 +548,7 @@ vvwikiapp/
 
 ### Security
 
-- source repo、Git history、APK、log 與 CI artifact 找不到 provider/Gemini private key；使用者匯入的 SSH key 只在 app-private storage。
+- source repo、Git history、log 與 CI artifact 找不到 provider/Gemini private key；個人 release APK 可含指定 SSH key，禁止分享／上傳，外流即 revoke/rotate。
 - log、backup、crash report 不含 token 或 Wiki 內容。
 - 使用者可在 app 內清除 cache 並知道如何 revoke token。
 - 確認 Gemini/Vertex AI 的資料處理條款後，才將工作 Wiki 開放給該 provider。

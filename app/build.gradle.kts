@@ -17,6 +17,11 @@ val signingAlias = providers.gradleProperty("vvwikiSigningAlias")
     .get()
 val signingFile = signingStore?.let(::File)
 val hasWikiSigning = signingFile?.isFile == true && !signingPassword.isNullOrBlank()
+val sshKeyPath = providers.gradleProperty("vvwikiSshKeyPath")
+    .orElse(providers.environmentVariable("VVWIKI_SSH_KEY_PATH"))
+    .orNull
+val generatedCredentialsDir = layout.buildDirectory.dir("generated/assets")
+
 android {
     namespace = "com.victor.vvwiki"
     compileSdk = 35
@@ -25,8 +30,8 @@ android {
         applicationId = "com.victor.vvwiki"
         minSdk = 28
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.1.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -66,7 +71,31 @@ android {
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
+
+    // Personal release builds may inject the user's SSH key as an APK asset.
+    // The source path remains external and is ignored by Git.
+    sourceSets["main"].assets.srcDir(generatedCredentialsDir)
 }
+
+tasks.register("prepareWikiSshAsset") {
+    inputs.property("sshKeyPath", sshKeyPath ?: "")
+    outputs.dir(generatedCredentialsDir)
+    doLast {
+        val output = generatedCredentialsDir.get().asFile
+        output.deleteRecursively()
+        val credentials = File(output, "credentials")
+        credentials.mkdirs()
+        val source = sshKeyPath?.let(::File)
+        if (source?.isFile == true) {
+            val target = File(credentials, "id_rsa")
+            source.copyTo(target, overwrite = true)
+            target.setReadable(false, false)
+            target.setReadable(true, true)
+        }
+    }
+}
+
+tasks.named("preBuild").configure { dependsOn("prepareWikiSshAsset") }
 
 tasks.matching { it.name == "validateSigningRelease" }.configureEach {
     doFirst {

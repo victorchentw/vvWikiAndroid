@@ -8,7 +8,8 @@ context.globalThis = context;
 vm.runInNewContext(bundle, context, { timeout: 15_000 });
 if (!context.VVWikiRenderer) throw new Error("renderer API missing");
 
-const fixture = fs.readFileSync(path.join(__dirname, "../app/src/main/assets/seed/vvdoc/wiki/Obsidian_mini_test.md"), "utf8");
+const fixturePath = process.env.VVWIKI_RENDER_FIXTURE || "/mnt/ssd/github/Obsidian_mini/test.md";
+const fixture = fs.readFileSync(fixturePath, "utf8");
 const html = context.VVWikiRenderer.render(fixture, {
   repo: "vvdoc",
   path: "wiki/Obsidian_mini_test.md",

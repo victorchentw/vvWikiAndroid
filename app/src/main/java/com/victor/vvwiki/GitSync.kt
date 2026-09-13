@@ -59,7 +59,7 @@ class GitSync(
 
     fun repositories(): List<RemoteRepository> = remotes
 
-    fun hasImportedKey(): Boolean = ensureCredentials() != null
+    fun hasConfiguredKey(): Boolean = ensureCredentials() != null
 
     fun importPrivateKey(uri: Uri): Boolean {
         credentialRoot.mkdirs()
@@ -91,7 +91,7 @@ class GitSync(
             val credentials = ensureCredentials()
             if (credentials == null) {
                 remotes.map {
-                    Result(it.id, false, message = "No SSH key. Import one in Settings.")
+                    Result(it.id, false, message = "No SSH key. Import one in Settings or build with VVWIKI_SSH_KEY_PATH.")
                 }
             } else {
                 installSshFactory(credentials.first, credentials.second)
@@ -123,7 +123,7 @@ class GitSync(
             if (previous.commit == commit.name) {
                 return Result(remote.id, true, commit.name, previous.files, "Already current")
             }
-            val files = readWikiFiles(metadata, commit)
+            val files = readWikiFiles(metadata, commit, remote.id)
             val blobRepository = openOrCreateBlobStore(blobDirectory, metadata)
             try {
                 fetchMissingBlobs(blobRepository, remote, files)
@@ -156,7 +156,7 @@ class GitSync(
         return repository.resolve(destination) ?: error("Remote ${remote.id} returned no $source")
     }
 
-    private fun readWikiFiles(repository: Repository, commit: ObjectId): List<GitFile> {
+    private fun readWikiFiles(repository: Repository, commit: ObjectId, repoId: String): List<GitFile> {
         val result = ArrayList<GitFile>()
         RevWalk(repository).use { walk ->
             val parsed = walk.parseCommit(commit)
@@ -168,7 +168,7 @@ class GitSync(
                     if (!path.startsWith("wiki/")) continue
                     val mode = tree.getFileMode(0)
                     if (mode.getObjectType() != Constants.OBJ_BLOB) continue
-                    if (!wikiRepository.isAllowedSyncPath(path)) continue
+                    if (!wikiRepository.isAllowedSyncPath(repoId, path)) continue
                     result += GitFile(path, tree.getObjectId(0))
                 }
             }
@@ -242,10 +242,19 @@ class GitSync(
         SshSessionFactory.setInstance(AppSshSessionFactory(key, knownHosts))
     }
 
-    /** Read only the key imported into app-private storage; never log its contents. */
+    /** Resolve the personal build asset or an imported key; never log its contents. */
     private fun ensureCredentials(): Pair<File, File>? {
         credentialRoot.mkdirs()
         val key = File(credentialRoot, "id_rsa")
+        if (!key.isFile) {
+            runCatching {
+                context.assets.open("credentials/id_rsa").use { input ->
+                    FileOutputStream(key).use { output -> input.copyTo(output) }
+                }
+                key.setReadable(false, false)
+                key.setReadable(true, true)
+            }.onFailure { key.delete() }
+        }
         if (!key.isFile) return null
 
         val knownHosts = File(credentialRoot, "known_hosts")

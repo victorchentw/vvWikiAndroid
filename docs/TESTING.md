@@ -1,20 +1,21 @@
 # Test checklist
 
-1. Install `app-release.apk`; import the SSH private key in Settings (the APK must not contain it).
-2. On first launch, wait for startup sync; Library status should show a short commit for both `vvdoc` and `radoc`, not `fixtures`.
-3. Tap `Sync` again with no remote changes; it should finish without replacing the cache and keep the same commit.
-4. Library: open `vvdoc / wiki/Obsidian_mini_test.md` or any synced `wiki/` document.
-5. Confirm frontmatter, headings, callout, table, task list, code, Mermaid and
+1. Install the personal `app-release.apk` built with `VVWIKI_SSH_KEY_PATH` (or import an SSH key in Settings for a no-key build).
+2. On first launch, wait for startup sync; Library status should show a short commit for both `vvdoc` and `radoc`, not `not synced`.
+3. Confirm the APK contains no Markdown fixture files; documents appear only after sync/import.
+4. Tap `Sync` again with no remote changes; it should finish without replacing the cache and keep the same commit.
+5. Library: open any synced `wiki/` Markdown document.
+6. Confirm frontmatter, headings, callout, table, task list, code, Mermaid and
    KaTeX render without network.
-6. In Reader, confirm the visible `−`/`+` buttons change rendered text size, and `Search` opens document search. Reader is dark-only; there is no Raw or light-mode toggle.
-7. Return to Library, Search `Mermaid`, open the result and confirm source line
+7. In Reader, confirm the visible `−`/`+` buttons change rendered text size, and `Search` opens document search. Reader is dark-only; there is no Raw or light-mode toggle.
+8. Return to Library, Search `Mermaid`, open the result and confirm source line
    metadata/highlight.
-8. Open `radoc / wiki/START_HERE.md`, tap `[[topics/rendering]]`, then use Reader
+9. Open `radoc / wiki/START_HERE.md`, tap `[[topics/rendering]]`, then use Reader
    back/forward.
-9. Settings: import a folder and verify Markdown/text appears; key/certificate
+10. Settings: import a folder and verify Markdown/text appears; key/certificate
    looking files and `..` paths must not appear. Test SSH key import with a copy
    of `id_rsa`; the UI must show only configured/key count state, never key text.
-10. Verify APK:
+11. Verify APK:
 
 ```bash
 $ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose --print-certs app-release.apk

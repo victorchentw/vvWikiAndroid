@@ -297,20 +297,20 @@ class MainActivity : Activity() {
         page.addView(button("Import into radoc") { launchImport("radoc") }, fullButtonParams())
         page.addView(button("Import SSH private key") { launchSshKeyImport() }, fullButtonParams())
         page.addView(button("Sync vvdoc + radoc now") { startSync() }, fullButtonParams())
-        page.addView(button("Reset local cache to fixtures") {
+        page.addView(button("Clear local cache") {
             AlertDialog.Builder(this)
-                .setTitle("Reset offline cache?")
-                .setMessage("Imported files will be removed and the bundled test fixtures restored.")
+                .setTitle("Clear offline cache?")
+                .setMessage("Synced and imported files will be removed. No Markdown fixtures are restored.")
                 .setNegativeButton("Cancel", null)
-                .setPositiveButton("Reset") { _, _ -> repository.resetAndInstallSeed(); showLibrary(); toast("Fixtures restored") }
+                .setPositiveButton("Clear") { _, _ -> repository.resetLocalCache(); showLibrary(); toast("Local cache cleared") }
                 .show()
         }, fullButtonParams())
-        val keyState = if (gitSync.hasImportedKey()) {
-            "SSH key configured in app-private storage."
+        val keyState = if (gitSync.hasConfiguredKey()) {
+            "SSH key configured for sync."
         } else {
-            "No SSH key configured; import one above. It is never bundled in the APK."
+            "No SSH key configured; import one above or build the personal APK with VVWIKI_SSH_KEY_PATH."
         }
-        page.addView(label("\nSync\n• vvdoc: GitHub victorchentw/vvdoc @ vv_note\n• radoc: GitLab victor.chen.tw/ra_doc @ main\n• Read-only shallow clone; only allowlisted Markdown/text/images enter the offline cache.\n• $keyState\n\nSecurity\n• WebView network loads and arbitrary HTML/scripts are blocked.\n• Imported key/certificate/credential-looking paths are skipped.\n• Reader is offline, dark-only and read-only; rendered text can be copied with Android text selection."))
+        page.addView(label("\nSync\n• vvdoc: GitHub victorchentw/vvdoc @ vv_note (Markdown only)\n• radoc: GitLab victor.chen.tw/ra_doc @ main\n• No Markdown is bundled; sync/import is required before documents appear.\n• $keyState\n\nSecurity\n• WebView network loads and arbitrary HTML/scripts are blocked.\n• Imported key/certificate/credential-looking paths are skipped.\n• Reader is offline, dark-only and read-only; rendered text can be copied with Android text selection."))
         page.addView(button("Open Android app settings") {
             startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, UriCompat.packageUri(packageName)))
         }, fullButtonParams())
@@ -369,13 +369,13 @@ class MainActivity : Activity() {
     private fun startStartupSync() {
         if (startupSyncAttempted) return
         startupSyncAttempted = true
-        if (gitSync.hasImportedKey()) startSync()
+        if (gitSync.hasConfiguredKey()) startSync()
     }
 
     private fun startSync() {
         if (syncInProgress) return
-        if (!gitSync.hasImportedKey()) {
-            toast("No SSH key configured; import one in Settings")
+        if (!gitSync.hasConfiguredKey()) {
+            toast("No SSH key configured; import one in Settings or build with VVWIKI_SSH_KEY_PATH")
             showSettings()
             return
         }
@@ -400,7 +400,7 @@ class MainActivity : Activity() {
         when {
             state.error != null -> "${remote.id}: error"
             state.commit != null -> "${remote.id}: ${state.commit.take(8)} (${state.files})"
-            else -> "${remote.id}: fixtures"
+            else -> "${remote.id}: not synced"
         }
     }
 
