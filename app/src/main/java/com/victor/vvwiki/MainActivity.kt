@@ -13,7 +13,10 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.text.Editable
+import android.text.SpannableString
+import android.text.Spanned
 import android.text.TextWatcher
+import android.text.style.RelativeSizeSpan
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -53,7 +56,7 @@ class MainActivity : Activity() {
     private var libraryNeedsRefresh = true
     private var libraryStatus = "Ready"
 
-    private enum class Screen { LIBRARY, SEARCH, SETTINGS }
+    private enum class Screen { LIBRARY, SEARCH, COMMENTS, SETTINGS }
 
     private val bg = Color.rgb(11, 15, 20)
     private val surface = Color.rgb(20, 28, 38)
@@ -167,9 +170,10 @@ class MainActivity : Activity() {
             background = roundedBackground(surface, 0)
             elevation = dp(4).toFloat()
         }
-        nav.addView(navButton("▦\nLibrary") { showLibrary() }, weightParams())
-        nav.addView(navButton("⌕\nSearch") { showSearch() }, weightParams())
-        nav.addView(navButton("⚙\nSettings") { showSettings() }, weightParams())
+        nav.addView(navButton("▦", "Library") { showLibrary() }, weightParams())
+        nav.addView(navButton("⌕", "Search") { showSearch() }, weightParams())
+        nav.addView(navButton("💬", "Comments") { showComments() }, weightParams())
+        nav.addView(navButton("⚙", "Settings") { showSettings() }, weightParams())
         root.addView(nav)
         root.post {
             applySystemUiForOrientation()
@@ -178,14 +182,17 @@ class MainActivity : Activity() {
         return root
     }
 
-    private fun navButton(label: String, action: () -> Unit): Button = Button(this).apply {
-        text = label
+    private fun navButton(icon: String, label: String, action: () -> Unit): Button = Button(this).apply {
+        val value = SpannableString("$icon\n$label")
+        value.setSpan(RelativeSizeSpan(1.75f), 0, icon.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        text = value
         textSize = 12f
         setAllCaps(false)
         setTextColor(textColor)
         gravity = Gravity.CENTER
         minHeight = 0
         minWidth = 0
+        includeFontPadding = true
         setPadding(0, 0, 0, 0)
         background = roundedBackground(Color.TRANSPARENT, 14)
         setOnClickListener { action() }
@@ -439,6 +446,134 @@ class MainActivity : Activity() {
         updateStatus("${results.size} results")
     }
 
+    private fun showComments() {
+        currentScreen = Screen.COMMENTS
+        searchResultsContainer = null
+        val page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(18), dp(20), dp(28))
+        }
+        page.addView(heading("Comments"))
+        page.addView(label("Notes and questions are stored locally and never change the Wiki source."))
+        page.addView(sectionLabel("Remote comments branch"))
+        val remoteActions = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        remoteActions.addView(button("Upload branch") { exportCommentsToGit() }, LinearLayout.LayoutParams(0, dp(52), 1f).apply { rightMargin = dp(6) })
+        remoteActions.addView(button("Delete remote") {
+            AlertDialog.Builder(this, AlertDialog.THEME_DEVICE_DEFAULT_DARK)
+                .setTitle("Delete remote comments branch?")
+                .setMessage("This deletes ${gitSync.commentsBranchName()} from both remotes. Local comments on this device will remain.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Delete") { _, _ -> deleteCommentsBranch() }
+                .show()
+        }, LinearLayout.LayoutParams(0, dp(52), 1f).apply { leftMargin = dp(6) })
+        page.addView(remoteActions)
+        page.addView(sectionLabel("Saved annotations"))
+
+        val scroll = ScrollView(this).apply { clipToPadding = false }
+        val list = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(4), 0, dp(28))
+        }
+        val comments = repository.allComments()
+        if (comments.isEmpty()) {
+            list.addView(emptyState("No comments yet", "Select text in Reader, then choose Add comment or Ask question."))
+        } else {
+            comments.forEach { comment -> list.addView(commentRow(comment)) }
+        }
+        scroll.addView(list)
+        page.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(4) })
+        content.removeAllViews()
+        content.addView(page)
+        updateStatus(if (comments.isEmpty()) "No annotations" else "${comments.size} annotations")
+    }
+
+    private fun commentRow(comment: WikiRepository.Comment): View {
+        val kind = if (comment.type == "question") "QUESTION" else "NOTE"
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(14), dp(12), dp(12))
+            background = roundedBackground(card, 16, border)
+            elevation = dp(1).toFloat()
+            isClickable = true
+            setOnClickListener { openReader(comment.repo, comment.path, commentId = comment.id) }
+        }
+        row.addView(TextView(this).apply {
+            text = "$kind  ·  ${comment.repo} / ${comment.path}"
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(if (comment.type == "question") Color.rgb(242, 190, 92) else accent)
+        })
+        row.addView(TextView(this).apply {
+            text = "“${comment.quote}”"
+            textSize = 15f
+            setTextColor(textColor)
+            maxLines = 3
+            setPadding(0, dp(7), 0, dp(4))
+        })
+        row.addView(TextView(this).apply {
+            text = comment.body
+            textSize = 14f
+            setTextColor(muted)
+            maxLines = 4
+        })
+        val actions = LinearLayout(this).apply {
+            gravity = Gravity.END
+            setPadding(0, dp(8), 0, 0)
+        }
+        actions.addView(button("Edit") { editComment(comment) }, LinearLayout.LayoutParams(dp(80), dp(40)).apply { rightMargin = dp(6) })
+        actions.addView(button("Delete") { confirmDeleteComment(comment) }, LinearLayout.LayoutParams(dp(80), dp(40)))
+        row.addView(actions)
+        return row.apply {
+            layoutParams = LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = dp(10)
+            }
+        }
+    }
+
+    private fun editComment(comment: WikiRepository.Comment) {
+        val input = EditText(this).apply {
+            setText(comment.body)
+            setTextColor(textColor)
+            setHintTextColor(muted)
+            minLines = 3
+            gravity = Gravity.TOP
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = roundedBackground(card, 12, border)
+        }
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), 0, dp(18), 0)
+            addView(input, LinearLayout.LayoutParams(-1, dp(110)))
+        }
+        AlertDialog.Builder(this, AlertDialog.THEME_DEVICE_DEFAULT_DARK)
+            .setTitle(if (comment.type == "question") "Edit question" else "Edit note")
+            .setView(layout)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save") { _, _ ->
+                if (repository.updateComment(comment.id, input.text.toString())) {
+                    toast("Comment updated")
+                    showComments()
+                } else {
+                    toast("Comment cannot be empty")
+                }
+            }
+            .show()
+    }
+
+    private fun confirmDeleteComment(comment: WikiRepository.Comment) {
+        AlertDialog.Builder(this, AlertDialog.THEME_DEVICE_DEFAULT_DARK)
+            .setTitle("Delete this ${if (comment.type == "question") "question" else "note"}?")
+            .setMessage("The Wiki source will not be changed.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Delete") { _, _ ->
+                if (repository.deleteComment(comment.id)) {
+                    toast("Comment deleted")
+                    showComments()
+                }
+            }
+            .show()
+    }
+
     private fun showSettings() {
         currentScreen = Screen.SETTINGS
         searchResultsContainer = null
@@ -643,12 +778,19 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun openReader(repo: String, path: String, line: Int? = null, find: String? = null) {
+    private fun openReader(
+        repo: String,
+        path: String,
+        line: Int? = null,
+        find: String? = null,
+        commentId: String? = null,
+    ) {
         startActivity(Intent(this, ReaderActivity::class.java).apply {
             putExtra(ReaderActivity.EXTRA_REPO, repo)
             putExtra(ReaderActivity.EXTRA_PATH, path)
             if (line != null) putExtra(ReaderActivity.EXTRA_LINE, line)
             if (!find.isNullOrBlank()) putExtra(ReaderActivity.EXTRA_FIND, find)
+            if (!commentId.isNullOrBlank()) putExtra(ReaderActivity.EXTRA_COMMENT_ID, commentId)
         })
     }
 

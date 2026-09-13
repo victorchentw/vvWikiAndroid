@@ -153,6 +153,41 @@ class WikiRepository(private val context: Context) {
 
     fun commentsJson(repo: String, path: String): String = commentsToJson(comments(repo, path))
 
+    fun allComments(): List<Comment> = documents()
+        .flatMap { document -> comments(document.repo, document.path) }
+        .sortedByDescending { it.createdAt }
+
+    fun updateComment(id: String, body: String): Boolean {
+        val value = body.trim()
+        if (id.isBlank() || value.isBlank()) return false
+        return findAndEditComment(id) { comment -> comment.copy(body = value) }
+    }
+
+    fun deleteComment(id: String): Boolean {
+        if (id.isBlank()) return false
+        for (document in documents()) {
+            val values = comments(document.repo, document.path).toMutableList()
+            if (values.removeAll { it.id == id }) {
+                readerPrefs.edit().putString(commentsKey(document.repo, document.path), commentsToJson(values)).apply()
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun findAndEditComment(id: String, transform: (Comment) -> Comment): Boolean {
+        for (document in documents()) {
+            val values = comments(document.repo, document.path).toMutableList()
+            val index = values.indexOfFirst { it.id == id }
+            if (index >= 0) {
+                values[index] = transform(values[index])
+                readerPrefs.edit().putString(commentsKey(document.repo, document.path), commentsToJson(values)).apply()
+                return true
+            }
+        }
+        return false
+    }
+
     fun addComment(
         repo: String,
         path: String,

@@ -148,6 +148,17 @@
     });
   }
 
+  function focusComment(commentId) {
+    const id = String(commentId || '');
+    if (!id) return;
+    const target = Array.from(root.querySelectorAll('mark.comment-highlight'))
+      .find((node) => node.dataset.commentId === id);
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target.classList.add('comment-focus');
+    window.setTimeout(() => target.classList.remove('comment-focus'), 1800);
+  }
+
   function searchText(term, direction) {
     const value = String(term || '');
     if (!value.trim()) {
@@ -265,6 +276,7 @@
   window.clearSearch = () => clearSearchMarks();
   window.getSelectionPayload = () => selectionPayload();
   window.applyComments = (comments) => applyComments(comments);
+  window.focusComment = (commentId) => focusComment(commentId);
   window.scrollToFragment = (fragment) => {
     const id = decodeURIComponent(String(fragment || '').replace(/^#/, ''));
     document.getElementById(id)?.scrollIntoView({ block: 'start' });

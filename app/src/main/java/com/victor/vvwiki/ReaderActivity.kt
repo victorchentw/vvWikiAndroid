@@ -53,6 +53,7 @@ class ReaderActivity : Activity() {
     private var textZoom = 100
     private var lineHint: Int? = null
     private var findHint: String? = null
+    private var commentIdHint: String? = null
     private val history = mutableListOf<Location>()
     private var historyIndex = -1
     private val scrollPositions = mutableMapOf<String, Int>()
@@ -89,6 +90,8 @@ class ReaderActivity : Activity() {
             ?: intent.getIntExtra(EXTRA_LINE, -1).takeIf { it > 0 }
         findHint = savedInstanceState?.getString(STATE_FIND)
             ?: intent.getStringExtra(EXTRA_FIND)
+        commentIdHint = savedInstanceState?.getString(STATE_COMMENT_ID)
+            ?: intent.getStringExtra(EXTRA_COMMENT_ID)
         current = Location(
             repo,
             path,
@@ -118,6 +121,7 @@ class ReaderActivity : Activity() {
         outState.putFloat(STATE_SCROLL_FRACTION, currentScrollFraction())
         outState.putInt(STATE_LINE, lineHint ?: -1)
         outState.putString(STATE_FIND, findInputValue())
+        outState.putString(STATE_COMMENT_ID, commentIdHint)
         super.onSaveInstanceState(outState)
     }
 
@@ -459,6 +463,8 @@ class ReaderActivity : Activity() {
         if (!::webView.isInitialized) return
         val docs = org.json.JSONArray(repository.allPaths(current.repo)).toString()
         val comments = JSONObject.quote(repository.commentsJson(current.repo, current.path))
+        val commentFocusId = commentIdHint?.takeIf { it.isNotBlank() }
+        commentIdHint = null
         val js = "window.renderWiki(${JSONObject.quote(source)},${JSONObject.quote(current.repo)}," +
             "${JSONObject.quote(current.path)},$docs);window.applyComments($comments);"
         webView.evaluateJavascript(js, null)
@@ -483,6 +489,11 @@ class ReaderActivity : Activity() {
                     restoringPosition = false
                 }
             }, 500)
+        }
+        commentFocusId?.let { id ->
+            webView.postDelayed({
+                webView.evaluateJavascript("window.focusComment(${JSONObject.quote(id)});", null)
+            }, 700)
         }
         findHint?.takeIf { it.isNotBlank() }?.let { term ->
             webView.postDelayed({
@@ -834,6 +845,7 @@ class ReaderActivity : Activity() {
         const val EXTRA_PATH = "path"
         const val EXTRA_LINE = "line"
         const val EXTRA_FIND = "find"
+        const val EXTRA_COMMENT_ID = "commentId"
         const val EXTRA_FRAGMENT = "fragment"
         private const val STATE_REPO = "reader.repo"
         private const val STATE_PATH = "reader.path"
@@ -842,6 +854,7 @@ class ReaderActivity : Activity() {
         private const val STATE_SCROLL_FRACTION = "reader.scrollFraction"
         private const val STATE_LINE = "reader.line"
         private const val STATE_FIND = "reader.find"
+        private const val STATE_COMMENT_ID = "reader.commentId"
         private const val MENU_GROUP_PROCESS_TEXT = 7100
         private const val MENU_ADD_COMMENT = 7101
         private const val MENU_ADD_QUESTION = 7102
