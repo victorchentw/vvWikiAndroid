@@ -211,22 +211,16 @@ class ReaderActivity : Activity() {
         }
         toolbar.addView(backButton, buttonParams())
         toolbar.addView(forwardButton, buttonParams())
-        val title = TextView(this).apply {
-            text = "Reader"
-            textSize = 16f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setTextColor(textColor)
-            gravity = Gravity.CENTER_VERTICAL
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
-        }
-        toolbar.addView(title, LinearLayout.LayoutParams(0, dp(44), 1f))
         toolbar.addView(toolbarButton("−") { adjustZoom(-10) }.apply {
             contentDescription = "Zoom out"
             textSize = 21f
         }, toolbarActionParams())
         toolbar.addView(toolbarButton("+") { adjustZoom(10) }.apply {
             contentDescription = "Zoom in"
+            textSize = 21f
+        }, toolbarActionParams())
+        toolbar.addView(toolbarButton("⟳") { refreshRendering() }.apply {
+            contentDescription = "Refresh rendered document"
             textSize = 21f
         }, toolbarActionParams())
         toolbar.addView(toolbarButton("✎") { showCommentsDialog() }.apply {
@@ -593,6 +587,13 @@ class ReaderActivity : Activity() {
         if (::webView.isInitialized) webView.settings.textZoom = textZoom
     }
 
+    private fun refreshRendering() {
+        if (!::webView.isInitialized || source.isBlank()) return
+        persistCurrentScroll()
+        pendingPosition = WikiRepository.ReaderPosition(webView.scrollY, currentScrollFraction())
+        evaluateRender()
+    }
+
     private fun showFindDialog() {
         searchDialog?.let { if (it.isShowing) { searchInput?.requestFocus(); return } }
         val layout = LinearLayout(this).apply {
@@ -850,8 +851,8 @@ class ReaderActivity : Activity() {
         addState(intArrayOf(android.R.attr.state_pressed), roundedBackground(card, 10))
         addState(intArrayOf(), roundedBackground(Color.TRANSPARENT, 10))
     }
-    private fun buttonParams() = LinearLayout.LayoutParams(dp(44), dp(44))
-    private fun toolbarActionParams() = LinearLayout.LayoutParams(dp(44), dp(44))
+    private fun buttonParams() = LinearLayout.LayoutParams(dp(42), dp(42))
+    private fun toolbarActionParams() = LinearLayout.LayoutParams(dp(42), dp(42))
     private fun roundedBackground(fill: Int, radiusDp: Int, stroke: Int? = null): GradientDrawable =
         GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
